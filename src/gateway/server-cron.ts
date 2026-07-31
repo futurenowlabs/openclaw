@@ -1,5 +1,5 @@
-import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { retireSessionMcpRuntime } from "../agents/agent-bundle-mcp-tools.js";
+import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { abortAndDrainEmbeddedAgentRun } from "../agents/embedded-agent.js";
 import { cleanupBrowserSessionsForLifecycleEnd } from "../browser-lifecycle-cleanup.js";
 import type { CliDeps } from "../cli/deps.types.js";
@@ -484,6 +484,7 @@ export function buildGatewayCronService(params: {
             status: evt.status,
             error: evt.error,
             summary: evt.summary,
+            assistantCompletion: evt.assistantCompletion,
             diagnostics: evt.diagnostics,
             delivered: evt.delivered,
             deliveryStatus: evt.deliveryStatus,

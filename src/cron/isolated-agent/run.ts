@@ -5,6 +5,7 @@ import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
 import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../../agents/openai-routing.js";
 import { expandToolGroups, normalizeToolName } from "../../agents/tool-policy.js";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
+import { isSilentReplyPayloadText } from "../../auto-reply/tokens.js";
 import type { CliDeps } from "../../cli/outbound-send-deps.js";
 import {
   getRuntimeConfigSnapshot,
@@ -47,6 +48,7 @@ import type {
   CronJob,
   CronRunTelemetry,
 } from "../types.js";
+import { buildCronAssistantCompletion } from "./assistant-completion.js";
 import { resolveCronChannelOutputPolicy } from "./channel-output-policy.js";
 import {
   isHeartbeatOnlyResponse,
@@ -194,6 +196,7 @@ export type { RunCronAgentTurnResult } from "./run.types.js";
 
 type CronExecutionRuntime = typeof import("./run-executor.runtime.js");
 type CronExecutionResult = Awaited<ReturnType<CronExecutionRuntime["executeCronRun"]>>;
+
 type CronModelCatalogRuntime = typeof import("./run-model-catalog.runtime.js");
 type CronDeliveryRuntime = typeof import("./run-delivery.runtime.js");
 type ResolvedCronDeliveryTarget = Awaited<ReturnType<CronDeliveryRuntime["resolveDeliveryTarget"]>>;
@@ -909,6 +912,7 @@ async function finalizeCronRun(params: {
   const { prepared, execution } = params;
   const finalRunResult = execution.runResult;
   const payloads = finalRunResult.payloads ?? [];
+  const assistantCompletion = buildCronAssistantCompletion(finalRunResult);
   let telemetry: CronRunTelemetry | undefined;
 
   if (finalRunResult.meta?.systemPromptReport) {
@@ -1049,6 +1053,7 @@ async function finalizeCronRun(params: {
       delivered: result?.delivered,
       deliveryAttempted: result?.deliveryAttempted,
       delivery: result?.delivery,
+      assistantCompletion,
       diagnostics: hasFatalErrorPayload
         ? mergeCronRunDiagnostics(
             agentDiagnostics,
@@ -1144,6 +1149,7 @@ async function finalizeCronRun(params: {
       deliveryAttempted:
         deliveryResult.result.deliveryAttempted ?? deliveryResult.deliveryAttempted,
       delivery: deliveryTrace,
+      assistantCompletion,
       diagnostics: mergeCronRunDiagnostics(
         agentDiagnostics,
         deliveryResult.result.diagnostics,
