@@ -33,6 +33,11 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     return undefined;
   }
   const entry = value as Record<string, unknown>;
+  const finalTextHashPresent = Object.prototype.hasOwnProperty.call(
+    entry,
+    "finalAssistantVisibleTextSha256",
+  );
+  const finalTextHash = entry.finalAssistantVisibleTextSha256;
   if (
     entry.contractVersion !== "openclaw.cron-assistant-completion.v1" ||
     typeof entry.toolCallDetected !== "boolean" ||
@@ -43,7 +48,11 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     (entry.toolCallCount as number) < 0 ||
     !Number.isSafeInteger(entry.toolFailureCount) ||
     (entry.toolFailureCount as number) < 0 ||
-    (entry.toolFailureCount as number) > (entry.toolCallCount as number)
+    (entry.toolFailureCount as number) > (entry.toolCallCount as number) ||
+    (entry.finalUserVisibleResult === true &&
+      (typeof finalTextHash !== "string" || !/^[a-f0-9]{64}$/.test(finalTextHash))) ||
+    (entry.finalUserVisibleResult === false && finalTextHashPresent) ||
+    (entry.finalUserVisibleResult === true && entry.finalAssistantVisible !== true)
   ) {
     return undefined;
   }
@@ -55,6 +64,9 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     finalUserVisibleResult: entry.finalUserVisibleResult,
     toolCallCount: entry.toolCallCount as number,
     toolFailureCount: entry.toolFailureCount as number,
+    ...(entry.finalUserVisibleResult === true
+      ? { finalAssistantVisibleTextSha256: finalTextHash as string }
+      : {}),
   };
 }
 

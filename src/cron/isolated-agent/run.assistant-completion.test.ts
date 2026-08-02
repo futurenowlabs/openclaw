@@ -1,5 +1,11 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildCronAssistantCompletion } from "./assistant-completion.js";
+import { resolveCronPayloadOutcome } from "./helpers.js";
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value.trim()).digest("hex");
+}
 
 function buildResult(params: {
   text?: string;
@@ -42,6 +48,7 @@ describe("buildCronAssistantCompletion", () => {
       finalUserVisibleResult: true,
       toolCallCount: 0,
       toolFailureCount: 0,
+      finalAssistantVisibleTextSha256: sha256("Public summary"),
     });
   });
 
@@ -56,6 +63,7 @@ describe("buildCronAssistantCompletion", () => {
       finalUserVisibleResult: true,
       toolCallCount: 1,
       toolFailureCount: 0,
+      finalAssistantVisibleTextSha256: sha256("Final summary"),
     });
   });
 
@@ -66,6 +74,7 @@ describe("buildCronAssistantCompletion", () => {
     expect(completion.finalUserVisibleResult).toBe(true);
     expect(completion.toolResultAccepted).toBe(true);
     expect(completion.toolFailureCount).toBe(1);
+    expect(completion.finalAssistantVisibleTextSha256).toBe(sha256("Safe final answer"));
   });
 
   it("rejects a pending tool call without a final continuation and emits no tool details", () => {
@@ -74,6 +83,7 @@ describe("buildCronAssistantCompletion", () => {
     );
     expect(completion.finalUserVisibleResult).toBe(false);
     expect(completion.toolResultAccepted).toBe(false);
+    expect(completion.finalAssistantVisibleTextSha256).toBeUndefined();
     expect(JSON.stringify(completion)).not.toContain("sensitive fixture argument");
     expect(JSON.stringify(completion)).not.toContain("call-0");
   });
@@ -99,5 +109,24 @@ describe("buildCronAssistantCompletion", () => {
     );
     expect(completion.finalUserVisibleResult).toBe(false);
     expect(completion.toolResultAccepted).toBe(false);
+    expect(completion.finalAssistantVisibleTextSha256).toBeUndefined();
+  });
+
+  it("keeps the explicit final hash distinct when public fallback text differs", () => {
+    const finalText = "Explicit safe final";
+    const completion = buildCronAssistantCompletion(
+      buildResult({ text: finalText, stopReason: "stop", calls: 1, failures: 1 }),
+    );
+    const publicOutcome = resolveCronPayloadOutcome({
+      payloads: [{ text: "same-shape intermediate tool result" }],
+      finalAssistantVisibleText: finalText,
+      preferFinalAssistantVisibleText: false,
+    });
+
+    expect(publicOutcome.outputText).toBe("same-shape intermediate tool result");
+    expect(completion.finalAssistantVisibleTextSha256).toBe(sha256(finalText));
+    expect(completion.finalAssistantVisibleTextSha256).not.toBe(
+      sha256(publicOutcome.outputText ?? ""),
+    );
   });
 });

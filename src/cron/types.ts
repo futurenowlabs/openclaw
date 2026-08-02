@@ -177,6 +177,8 @@ export type CronAssistantCompletion = {
   finalUserVisibleResult: boolean;
   toolCallCount: number;
   toolFailureCount: number;
+  /** SHA-256 of the normalized explicit terminal assistant-visible text. */
+  finalAssistantVisibleTextSha256?: string;
 };
 
 /** Execution result persisted on cron state, run logs, and isolated turn results. */

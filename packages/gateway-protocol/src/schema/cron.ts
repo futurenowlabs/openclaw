@@ -119,23 +119,36 @@ const CronRunDiagnosticSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const CronAssistantCompletionCommonFields = {
+  contractVersion: Type.Literal("openclaw.cron-assistant-completion.v1"),
+  toolCallDetected: Type.Boolean(),
+  toolResultAccepted: Type.Boolean(),
+  toolCallCount: Type.Integer({ minimum: 0 }),
+  toolFailureCount: Type.Integer({ minimum: 0 }),
+};
+const CronAssistantCompletionSchema = Type.Union([
+  Type.Object(
+    {
+      ...CronAssistantCompletionCommonFields,
+      finalAssistantVisible: Type.Literal(true),
+      finalUserVisibleResult: Type.Literal(true),
+      finalAssistantVisibleTextSha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...CronAssistantCompletionCommonFields,
+      finalAssistantVisible: Type.Boolean(),
+      finalUserVisibleResult: Type.Literal(false),
+    },
+    { additionalProperties: false },
+  ),
+]);
 const CronRunDiagnosticsSchema = Type.Object(
   {
     summary: Type.Optional(Type.String()),
-    assistantCompletion: Type.Optional(
-      Type.Object(
-        {
-          contractVersion: Type.Literal("openclaw.cron-assistant-completion.v1"),
-          toolCallDetected: Type.Boolean(),
-          toolResultAccepted: Type.Boolean(),
-          finalAssistantVisible: Type.Boolean(),
-          finalUserVisibleResult: Type.Boolean(),
-          toolCallCount: Type.Integer({ minimum: 0 }),
-          toolFailureCount: Type.Integer({ minimum: 0 }),
-        },
-        { additionalProperties: false },
-      ),
-    ),
+    assistantCompletion: Type.Optional(CronAssistantCompletionSchema),
     entries: Type.Array(CronRunDiagnosticSchema),
   },
   { additionalProperties: false },
@@ -502,20 +515,7 @@ export const CronRunLogEntrySchema = Type.Object(
     error: Type.Optional(Type.String()),
     errorReason: Type.Optional(CronFailoverReasonSchema),
     summary: Type.Optional(Type.String()),
-    assistantCompletion: Type.Optional(
-      Type.Object(
-        {
-          contractVersion: Type.Literal("openclaw.cron-assistant-completion.v1"),
-          toolCallDetected: Type.Boolean(),
-          toolResultAccepted: Type.Boolean(),
-          finalAssistantVisible: Type.Boolean(),
-          finalUserVisibleResult: Type.Boolean(),
-          toolCallCount: Type.Integer({ minimum: 0 }),
-          toolFailureCount: Type.Integer({ minimum: 0 }),
-        },
-        { additionalProperties: false },
-      ),
-    ),
+    assistantCompletion: Type.Optional(CronAssistantCompletionSchema),
     diagnostics: Type.Optional(CronRunDiagnosticsSchema),
     delivered: Type.Optional(Type.Boolean()),
     deliveryStatus: Type.Optional(CronDeliveryStatusSchema),

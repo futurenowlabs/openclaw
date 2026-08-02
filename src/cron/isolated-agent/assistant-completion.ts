@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { EmbeddedAgentRunResult } from "../../agents/embedded-agent-runner/types.js";
 import { isSilentReplyPayloadText } from "../../auto-reply/tokens.js";
@@ -13,7 +14,11 @@ const NON_FINAL_ASSISTANT_STOP_REASONS = new Set([
   "tooluse",
 ]);
 
-/** Builds the content-free public proof consumed by cron observers. */
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** Builds the content-redacted public proof consumed by cron observers. */
 export function buildCronAssistantCompletion(
   result: Pick<EmbeddedAgentRunResult, "meta" | "payloads">,
 ): CronAssistantCompletion {
@@ -55,5 +60,8 @@ export function buildCronAssistantCompletion(
     finalUserVisibleResult,
     toolCallCount,
     toolFailureCount,
+    ...(finalUserVisibleResult
+      ? { finalAssistantVisibleTextSha256: sha256(finalAssistantText) }
+      : {}),
   };
 }

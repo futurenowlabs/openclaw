@@ -16,6 +16,7 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
         finalUserVisibleResult: true,
         toolCallCount: 1,
         toolFailureCount: 0,
+        finalAssistantVisibleTextSha256: "a".repeat(64),
         privateDetail: "must-not-survive",
       },
     });
@@ -28,6 +29,7 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
       finalUserVisibleResult: true,
       toolCallCount: 1,
       toolFailureCount: 0,
+      finalAssistantVisibleTextSha256: "a".repeat(64),
     });
     expect(JSON.stringify(result?.assistantCompletion)).not.toContain("privateDetail");
   });
@@ -46,6 +48,26 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
         finalUserVisibleResult: true,
         toolCallCount: 1,
         toolFailureCount: 2,
+      },
+    });
+
+    expect(result?.assistantCompletion).toBeUndefined();
+  });
+
+  it("drops visible completion evidence without an exact text binding", () => {
+    const result = parseCronRunLogEntryObject({
+      ts: 1,
+      jobId: "fixture-job",
+      action: "finished",
+      status: "ok",
+      assistantCompletion: {
+        contractVersion: "openclaw.cron-assistant-completion.v1",
+        toolCallDetected: false,
+        toolResultAccepted: false,
+        finalAssistantVisible: true,
+        finalUserVisibleResult: true,
+        toolCallCount: 0,
+        toolFailureCount: 0,
       },
     });
 

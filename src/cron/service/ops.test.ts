@@ -456,6 +456,7 @@ describe("cron service ops seam coverage", () => {
       finalUserVisibleResult: true,
       toolCallCount: 1,
       toolFailureCount: 0,
+      finalAssistantVisibleTextSha256: "a".repeat(64),
     };
     const state = createCronServiceState({
       storePath,

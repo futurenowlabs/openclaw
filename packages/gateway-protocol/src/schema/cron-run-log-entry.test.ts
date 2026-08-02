@@ -26,6 +26,7 @@ describe("CronRunLogEntrySchema assistant completion", () => {
           finalUserVisibleResult: true,
           toolCallCount: 1,
           toolFailureCount: 0,
+          finalAssistantVisibleTextSha256: "a".repeat(64),
         }),
       ),
     ).toBe(true);
@@ -43,7 +44,39 @@ describe("CronRunLogEntrySchema assistant completion", () => {
           finalUserVisibleResult: false,
           toolCallCount: 1,
           toolFailureCount: 1,
+          finalAssistantVisibleTextSha256: "a".repeat(64),
           command: "must-not-cross-public-contract",
+        }),
+      ),
+    ).toBe(false);
+
+    expect(
+      Value.Check(
+        CronRunLogEntrySchema,
+        entry({
+          contractVersion: "openclaw.cron-assistant-completion.v1",
+          toolCallDetected: false,
+          toolResultAccepted: false,
+          finalAssistantVisible: true,
+          finalUserVisibleResult: true,
+          toolCallCount: 0,
+          toolFailureCount: 0,
+          finalAssistantVisibleTextSha256: "not-a-sha256",
+        }),
+      ),
+    ).toBe(false);
+
+    expect(
+      Value.Check(
+        CronRunLogEntrySchema,
+        entry({
+          contractVersion: "openclaw.cron-assistant-completion.v1",
+          toolCallDetected: false,
+          toolResultAccepted: false,
+          finalAssistantVisible: true,
+          finalUserVisibleResult: true,
+          toolCallCount: 0,
+          toolFailureCount: 0,
         }),
       ),
     ).toBe(false);
