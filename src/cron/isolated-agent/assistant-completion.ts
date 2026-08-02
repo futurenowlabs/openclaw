@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { EmbeddedAgentRunResult } from "../../agents/embedded-agent-runner/types.js";
 import { isSilentReplyPayloadText } from "../../auto-reply/tokens.js";
 import type { CronAssistantCompletion } from "../types.js";
+import { CRON_PUBLIC_SUMMARY_PROJECTION, pickSummaryFromOutput } from "./helpers.js";
 
 const NON_FINAL_ASSISTANT_STOP_REASONS = new Set([
   "aborted",
@@ -13,7 +15,11 @@ const NON_FINAL_ASSISTANT_STOP_REASONS = new Set([
   "tooluse",
 ]);
 
-/** Builds the content-free public proof consumed by cron observers. */
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+/** Builds the content-redacted public proof consumed by cron observers. */
 export function buildCronAssistantCompletion(
   result: Pick<EmbeddedAgentRunResult, "meta" | "payloads">,
 ): CronAssistantCompletion {
@@ -31,25 +37,21 @@ export function buildCronAssistantCompletion(
     result.meta.stopReason ?? result.meta.completion?.stopReason,
   )?.toLowerCase();
   const finalAssistantText = normalizeOptionalString(result.meta.finalAssistantVisibleText);
+  const finalAssistantPublicText = pickSummaryFromOutput(finalAssistantText);
   const finalAssistantVisible =
     finalAssistantText !== undefined && !isSilentReplyPayloadText(finalAssistantText);
-  const hasStructuredError = (result.payloads ?? []).some((payload) => payload.isError === true);
   const stoppedBeforeFinal = stopReason ? NON_FINAL_ASSISTANT_STOP_REASONS.has(stopReason) : false;
   const toolCallDetected = toolCallCount > 0 || pendingToolCallCount > 0;
   const toolResultAccepted =
     toolCallDetected &&
     toolCallCount > 0 &&
-    toolFailureCount === 0 &&
     pendingToolCallCount === 0 &&
-    !hasStructuredError &&
     !stoppedBeforeFinal &&
     finalAssistantVisible;
   const finalUserVisibleResult =
     finalAssistantVisible &&
-    !hasStructuredError &&
     !stoppedBeforeFinal &&
     pendingToolCallCount === 0 &&
-    toolFailureCount === 0 &&
     (!toolCallDetected || toolResultAccepted);
 
   return {
@@ -60,5 +62,11 @@ export function buildCronAssistantCompletion(
     finalUserVisibleResult,
     toolCallCount,
     toolFailureCount,
+    ...(finalUserVisibleResult
+      ? {
+          publicTextProjection: CRON_PUBLIC_SUMMARY_PROJECTION,
+          publicTextSha256: sha256(finalAssistantPublicText as string),
+        }
+      : {}),
   };
 }

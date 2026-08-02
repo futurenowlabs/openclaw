@@ -11,6 +11,9 @@ type DeliveryPayload = Pick<
   "text" | "mediaUrl" | "mediaUrls" | "presentation" | "interactive" | "channelData" | "isError"
 >;
 
+export const CRON_PUBLIC_SUMMARY_PROJECTION =
+  "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1" as const;
+
 /** Normalized cron run payload state used for summaries, delivery, and failure classification. */
 export type CronPayloadOutcome = {
   summary?: string;

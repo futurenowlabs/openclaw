@@ -443,6 +443,50 @@ describe("cron service ops seam coverage", () => {
     }
   });
 
+  it("preserves assistant completion proof on manual public cron runs", async () => {
+    const { storePath } = await makeStorePath();
+    const now = Date.parse("2026-03-23T12:00:00.000Z");
+    await writeDueIsolatedJobSnapshot(storePath, now);
+    const finishedEvents: Array<Record<string, unknown>> = [];
+    const assistantCompletion = {
+      contractVersion: "openclaw.cron-assistant-completion.v1" as const,
+      toolCallDetected: true,
+      toolResultAccepted: true,
+      finalAssistantVisible: true,
+      finalUserVisibleResult: true,
+      toolCallCount: 1,
+      toolFailureCount: 0,
+      publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+      publicTextSha256: "a".repeat(64),
+    };
+    const state = createCronServiceState({
+      storePath,
+      cronEnabled: true,
+      log: logger,
+      nowMs: () => now,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeat: vi.fn(),
+      runIsolatedAgentJob: vi.fn(async () => ({
+        status: "ok" as const,
+        summary: "done",
+        assistantCompletion,
+      })),
+      onEvent: (event) => {
+        if (event.action === "finished") {
+          finishedEvents.push(event as unknown as Record<string, unknown>);
+        }
+      },
+    });
+
+    await expect(run(state, "isolated-timeout", "force")).resolves.toEqual({
+      ok: true,
+      ran: true,
+    });
+
+    expect(finishedEvents).toHaveLength(1);
+    expect(finishedEvents[0]?.assistantCompletion).toEqual(assistantCompletion);
+  });
+
   it("records timed out manual runs as timed_out in the shared task registry", async () => {
     const { storePath } = await makeStorePath();
     const now = Date.parse("2026-03-23T12:00:00.000Z");

@@ -33,6 +33,13 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     return undefined;
   }
   const entry = value as Record<string, unknown>;
+  const publicTextProjectionPresent = Object.prototype.hasOwnProperty.call(
+    entry,
+    "publicTextProjection",
+  );
+  const publicTextHashPresent = Object.prototype.hasOwnProperty.call(entry, "publicTextSha256");
+  const publicTextProjection = entry.publicTextProjection;
+  const publicTextHash = entry.publicTextSha256;
   if (
     entry.contractVersion !== "openclaw.cron-assistant-completion.v1" ||
     typeof entry.toolCallDetected !== "boolean" ||
@@ -43,7 +50,14 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     (entry.toolCallCount as number) < 0 ||
     !Number.isSafeInteger(entry.toolFailureCount) ||
     (entry.toolFailureCount as number) < 0 ||
-    (entry.toolFailureCount as number) > (entry.toolCallCount as number)
+    (entry.toolFailureCount as number) > (entry.toolCallCount as number) ||
+    (entry.finalUserVisibleResult === true &&
+      publicTextProjection !== "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1") ||
+    (entry.finalUserVisibleResult === true &&
+      (typeof publicTextHash !== "string" || !/^[a-f0-9]{64}$/.test(publicTextHash))) ||
+    (entry.finalUserVisibleResult === false &&
+      (publicTextProjectionPresent || publicTextHashPresent)) ||
+    (entry.finalUserVisibleResult === true && entry.finalAssistantVisible !== true)
   ) {
     return undefined;
   }
@@ -55,6 +69,13 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     finalUserVisibleResult: entry.finalUserVisibleResult,
     toolCallCount: entry.toolCallCount as number,
     toolFailureCount: entry.toolFailureCount as number,
+    ...(entry.finalUserVisibleResult === true
+      ? {
+          publicTextProjection:
+            publicTextProjection as "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+          publicTextSha256: publicTextHash as string,
+        }
+      : {}),
   };
 }
 
