@@ -848,6 +848,7 @@ async function finishPreparedManualRun(
         status: coreResult.status,
         error: coreResult.error,
         summary: coreResult.summary,
+        assistantCompletion: coreResult.assistantCompletion,
         diagnostics: coreResult.diagnostics,
         delivered: job.state.lastDelivered,
         deliveryStatus: job.state.lastDeliveryStatus,
