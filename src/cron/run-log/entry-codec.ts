@@ -33,11 +33,13 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     return undefined;
   }
   const entry = value as Record<string, unknown>;
-  const finalTextHashPresent = Object.prototype.hasOwnProperty.call(
+  const publicTextProjectionPresent = Object.prototype.hasOwnProperty.call(
     entry,
-    "finalAssistantVisibleTextSha256",
+    "publicTextProjection",
   );
-  const finalTextHash = entry.finalAssistantVisibleTextSha256;
+  const publicTextHashPresent = Object.prototype.hasOwnProperty.call(entry, "publicTextSha256");
+  const publicTextProjection = entry.publicTextProjection;
+  const publicTextHash = entry.publicTextSha256;
   if (
     entry.contractVersion !== "openclaw.cron-assistant-completion.v1" ||
     typeof entry.toolCallDetected !== "boolean" ||
@@ -50,8 +52,11 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     (entry.toolFailureCount as number) < 0 ||
     (entry.toolFailureCount as number) > (entry.toolCallCount as number) ||
     (entry.finalUserVisibleResult === true &&
-      (typeof finalTextHash !== "string" || !/^[a-f0-9]{64}$/.test(finalTextHash))) ||
-    (entry.finalUserVisibleResult === false && finalTextHashPresent) ||
+      publicTextProjection !== "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1") ||
+    (entry.finalUserVisibleResult === true &&
+      (typeof publicTextHash !== "string" || !/^[a-f0-9]{64}$/.test(publicTextHash))) ||
+    (entry.finalUserVisibleResult === false &&
+      (publicTextProjectionPresent || publicTextHashPresent)) ||
     (entry.finalUserVisibleResult === true && entry.finalAssistantVisible !== true)
   ) {
     return undefined;
@@ -65,7 +70,11 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     toolCallCount: entry.toolCallCount as number,
     toolFailureCount: entry.toolFailureCount as number,
     ...(entry.finalUserVisibleResult === true
-      ? { finalAssistantVisibleTextSha256: finalTextHash as string }
+      ? {
+          publicTextProjection:
+            publicTextProjection as "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+          publicTextSha256: publicTextHash as string,
+        }
       : {}),
   };
 }

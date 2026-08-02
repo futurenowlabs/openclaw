@@ -456,7 +456,8 @@ describe("cron service ops seam coverage", () => {
       finalUserVisibleResult: true,
       toolCallCount: 1,
       toolFailureCount: 0,
-      finalAssistantVisibleTextSha256: "a".repeat(64),
+      publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+      publicTextSha256: "a".repeat(64),
     };
     const state = createCronServiceState({
       storePath,

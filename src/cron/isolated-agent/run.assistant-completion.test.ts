@@ -1,10 +1,21 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { buildCronAssistantCompletion } from "./assistant-completion.js";
-import { resolveCronPayloadOutcome } from "./helpers.js";
+import {
+  CRON_PUBLIC_SUMMARY_PROJECTION,
+  pickSummaryFromOutput,
+  resolveCronPayloadOutcome,
+} from "./helpers.js";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value.trim()).digest("hex");
+}
+
+function expectedPublicBinding(text: string) {
+  return {
+    publicTextProjection: CRON_PUBLIC_SUMMARY_PROJECTION,
+    publicTextSha256: sha256(pickSummaryFromOutput(text) as string),
+  };
 }
 
 function buildResult(params: {
@@ -48,7 +59,7 @@ describe("buildCronAssistantCompletion", () => {
       finalUserVisibleResult: true,
       toolCallCount: 0,
       toolFailureCount: 0,
-      finalAssistantVisibleTextSha256: sha256("Public summary"),
+      ...expectedPublicBinding("Public summary"),
     });
   });
 
@@ -63,7 +74,7 @@ describe("buildCronAssistantCompletion", () => {
       finalUserVisibleResult: true,
       toolCallCount: 1,
       toolFailureCount: 0,
-      finalAssistantVisibleTextSha256: sha256("Final summary"),
+      ...expectedPublicBinding("Final summary"),
     });
   });
 
@@ -74,7 +85,7 @@ describe("buildCronAssistantCompletion", () => {
     expect(completion.finalUserVisibleResult).toBe(true);
     expect(completion.toolResultAccepted).toBe(true);
     expect(completion.toolFailureCount).toBe(1);
-    expect(completion.finalAssistantVisibleTextSha256).toBe(sha256("Safe final answer"));
+    expect(completion).toMatchObject(expectedPublicBinding("Safe final answer"));
   });
 
   it("rejects a pending tool call without a final continuation and emits no tool details", () => {
@@ -83,7 +94,8 @@ describe("buildCronAssistantCompletion", () => {
     );
     expect(completion.finalUserVisibleResult).toBe(false);
     expect(completion.toolResultAccepted).toBe(false);
-    expect(completion.finalAssistantVisibleTextSha256).toBeUndefined();
+    expect(completion.publicTextProjection).toBeUndefined();
+    expect(completion.publicTextSha256).toBeUndefined();
     expect(JSON.stringify(completion)).not.toContain("sensitive fixture argument");
     expect(JSON.stringify(completion)).not.toContain("call-0");
   });
@@ -109,7 +121,8 @@ describe("buildCronAssistantCompletion", () => {
     );
     expect(completion.finalUserVisibleResult).toBe(false);
     expect(completion.toolResultAccepted).toBe(false);
-    expect(completion.finalAssistantVisibleTextSha256).toBeUndefined();
+    expect(completion.publicTextProjection).toBeUndefined();
+    expect(completion.publicTextSha256).toBeUndefined();
   });
 
   it("keeps the explicit final hash distinct when public fallback text differs", () => {
@@ -124,9 +137,29 @@ describe("buildCronAssistantCompletion", () => {
     });
 
     expect(publicOutcome.outputText).toBe("same-shape intermediate tool result");
-    expect(completion.finalAssistantVisibleTextSha256).toBe(sha256(finalText));
-    expect(completion.finalAssistantVisibleTextSha256).not.toBe(
-      sha256(publicOutcome.outputText ?? ""),
-    );
+    expect(completion).toMatchObject(expectedPublicBinding(finalText));
+    expect(completion.publicTextSha256).not.toBe(sha256(publicOutcome.outputText ?? ""));
+  });
+
+  it("binds long finals to the exact bounded public summary projection", () => {
+    for (const { finalText, expectedPublicText } of [
+      {
+        finalText: "a".repeat(2_001),
+        expectedPublicText: `${"a".repeat(2_000)}…`,
+      },
+      {
+        finalText: `${"b".repeat(1_999)}😀tail`,
+        expectedPublicText: `${"b".repeat(1_999)}…`,
+      },
+    ]) {
+      const completion = buildCronAssistantCompletion(
+        buildResult({ text: finalText, stopReason: "stop", calls: 1 }),
+      );
+      expect(pickSummaryFromOutput(finalText)).toBe(expectedPublicText);
+      expect(completion).toMatchObject({
+        finalUserVisibleResult: true,
+        ...expectedPublicBinding(expectedPublicText),
+      });
+    }
   });
 });

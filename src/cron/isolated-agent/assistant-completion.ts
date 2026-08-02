@@ -3,6 +3,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import type { EmbeddedAgentRunResult } from "../../agents/embedded-agent-runner/types.js";
 import { isSilentReplyPayloadText } from "../../auto-reply/tokens.js";
 import type { CronAssistantCompletion } from "../types.js";
+import { CRON_PUBLIC_SUMMARY_PROJECTION, pickSummaryFromOutput } from "./helpers.js";
 
 const NON_FINAL_ASSISTANT_STOP_REASONS = new Set([
   "aborted",
@@ -36,6 +37,7 @@ export function buildCronAssistantCompletion(
     result.meta.stopReason ?? result.meta.completion?.stopReason,
   )?.toLowerCase();
   const finalAssistantText = normalizeOptionalString(result.meta.finalAssistantVisibleText);
+  const finalAssistantPublicText = pickSummaryFromOutput(finalAssistantText);
   const finalAssistantVisible =
     finalAssistantText !== undefined && !isSilentReplyPayloadText(finalAssistantText);
   const stoppedBeforeFinal = stopReason ? NON_FINAL_ASSISTANT_STOP_REASONS.has(stopReason) : false;
@@ -61,7 +63,10 @@ export function buildCronAssistantCompletion(
     toolCallCount,
     toolFailureCount,
     ...(finalUserVisibleResult
-      ? { finalAssistantVisibleTextSha256: sha256(finalAssistantText) }
+      ? {
+          publicTextProjection: CRON_PUBLIC_SUMMARY_PROJECTION,
+          publicTextSha256: sha256(finalAssistantPublicText as string),
+        }
       : {}),
   };
 }

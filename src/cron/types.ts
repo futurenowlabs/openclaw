@@ -177,8 +177,10 @@ export type CronAssistantCompletion = {
   finalUserVisibleResult: boolean;
   toolCallCount: number;
   toolFailureCount: number;
-  /** SHA-256 of the normalized explicit terminal assistant-visible text. */
-  finalAssistantVisibleTextSha256?: string;
+  /** Typed bounded projection used for the public cron run text. */
+  publicTextProjection?: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1";
+  /** SHA-256 of that exact producer-derived public text projection. */
+  publicTextSha256?: string;
 };
 
 /** Execution result persisted on cron state, run logs, and isolated turn results. */

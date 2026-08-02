@@ -26,7 +26,8 @@ describe("CronRunLogEntrySchema assistant completion", () => {
           finalUserVisibleResult: true,
           toolCallCount: 1,
           toolFailureCount: 0,
-          finalAssistantVisibleTextSha256: "a".repeat(64),
+          publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+          publicTextSha256: "a".repeat(64),
         }),
       ),
     ).toBe(true);
@@ -44,7 +45,8 @@ describe("CronRunLogEntrySchema assistant completion", () => {
           finalUserVisibleResult: false,
           toolCallCount: 1,
           toolFailureCount: 1,
-          finalAssistantVisibleTextSha256: "a".repeat(64),
+          publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+          publicTextSha256: "a".repeat(64),
           command: "must-not-cross-public-contract",
         }),
       ),
@@ -61,7 +63,25 @@ describe("CronRunLogEntrySchema assistant completion", () => {
           finalUserVisibleResult: true,
           toolCallCount: 0,
           toolFailureCount: 0,
-          finalAssistantVisibleTextSha256: "not-a-sha256",
+          publicTextProjection: "unreviewed-public-projection",
+          publicTextSha256: "a".repeat(64),
+        }),
+      ),
+    ).toBe(false);
+
+    expect(
+      Value.Check(
+        CronRunLogEntrySchema,
+        entry({
+          contractVersion: "openclaw.cron-assistant-completion.v1",
+          toolCallDetected: false,
+          toolResultAccepted: false,
+          finalAssistantVisible: true,
+          finalUserVisibleResult: true,
+          toolCallCount: 0,
+          toolFailureCount: 0,
+          publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+          publicTextSha256: "not-a-sha256",
         }),
       ),
     ).toBe(false);
