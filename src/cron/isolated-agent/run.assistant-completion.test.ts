@@ -8,12 +8,13 @@ function buildResult(params: {
   failures?: number;
   pending?: number;
   isError?: boolean;
+  finalAssistantVisible?: boolean;
 }) {
   return {
     payloads: params.text === undefined ? [] : [{ text: params.text, isError: params.isError }],
     meta: {
       durationMs: 1,
-      finalAssistantVisibleText: params.text,
+      finalAssistantVisibleText: params.finalAssistantVisible === false ? undefined : params.text,
       stopReason: params.stopReason,
       toolSummary: {
         calls: params.calls ?? 0,
@@ -58,12 +59,13 @@ describe("buildCronAssistantCompletion", () => {
     });
   });
 
-  it("rejects a failed tool even when a misleading non-empty text payload exists", () => {
+  it("admits an explicit final assistant continuation after a settled failed tool result", () => {
     const completion = buildCronAssistantCompletion(
-      buildResult({ text: "Misleading completion", stopReason: "stop", calls: 1, failures: 1 }),
+      buildResult({ text: "Safe final answer", stopReason: "stop", calls: 1, failures: 1 }),
     );
-    expect(completion.finalUserVisibleResult).toBe(false);
-    expect(completion.toolResultAccepted).toBe(false);
+    expect(completion.finalUserVisibleResult).toBe(true);
+    expect(completion.toolResultAccepted).toBe(true);
+    expect(completion.toolFailureCount).toBe(1);
   });
 
   it("rejects a pending tool call without a final continuation and emits no tool details", () => {
@@ -84,9 +86,16 @@ describe("buildCronAssistantCompletion", () => {
     expect(completion.toolResultAccepted).toBe(true);
   });
 
-  it("rejects structured error payloads without inspecting warning text", () => {
+  it("rejects structured error payloads without an explicit final assistant continuation", () => {
     const completion = buildCronAssistantCompletion(
-      buildResult({ text: "ordinary-looking text", stopReason: "stop", calls: 1, isError: true }),
+      buildResult({
+        text: "ordinary-looking text",
+        stopReason: "stop",
+        calls: 1,
+        failures: 1,
+        isError: true,
+        finalAssistantVisible: false,
+      }),
     );
     expect(completion.finalUserVisibleResult).toBe(false);
     expect(completion.toolResultAccepted).toBe(false);

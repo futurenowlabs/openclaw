@@ -33,23 +33,18 @@ export function buildCronAssistantCompletion(
   const finalAssistantText = normalizeOptionalString(result.meta.finalAssistantVisibleText);
   const finalAssistantVisible =
     finalAssistantText !== undefined && !isSilentReplyPayloadText(finalAssistantText);
-  const hasStructuredError = (result.payloads ?? []).some((payload) => payload.isError === true);
   const stoppedBeforeFinal = stopReason ? NON_FINAL_ASSISTANT_STOP_REASONS.has(stopReason) : false;
   const toolCallDetected = toolCallCount > 0 || pendingToolCallCount > 0;
   const toolResultAccepted =
     toolCallDetected &&
     toolCallCount > 0 &&
-    toolFailureCount === 0 &&
     pendingToolCallCount === 0 &&
-    !hasStructuredError &&
     !stoppedBeforeFinal &&
     finalAssistantVisible;
   const finalUserVisibleResult =
     finalAssistantVisible &&
-    !hasStructuredError &&
     !stoppedBeforeFinal &&
     pendingToolCallCount === 0 &&
-    toolFailureCount === 0 &&
     (!toolCallDetected || toolResultAccepted);
 
   return {
