@@ -1,5 +1,11 @@
 // Public gateway/client helpers for plugins that talk to the host gateway surface.
 
+import {
+  GATEWAY_CLIENT_MODES,
+  GATEWAY_CLIENT_NAMES,
+} from "../../packages/gateway-protocol/src/client-info.js";
+import { callGatewayLeastPrivilege, type CallGatewayOptions } from "../gateway/call.js";
+
 export * from "../gateway/channel-status-patches.js";
 export { addGatewayClientOptions, callGatewayFromCli } from "../cli/gateway-rpc.js";
 export type { GatewayRpcOpts } from "../cli/gateway-rpc.js";
@@ -41,3 +47,15 @@ export {
 export { ErrorCodes, errorShape } from "../../packages/gateway-protocol/src/index.js";
 export type { EventFrame } from "../../packages/gateway-protocol/src/index.js";
 export type { GatewayRequestHandlerOptions } from "../gateway/server-methods/types.js";
+
+export type GatewayRuntimeCallOptions = Omit<CallGatewayOptions, "clientName" | "mode" | "scopes">;
+
+export async function callGateway<T = Record<string, unknown>>(
+  opts: GatewayRuntimeCallOptions,
+): Promise<T> {
+  return await callGatewayLeastPrivilege<T>({
+    ...opts,
+    clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+    mode: GATEWAY_CLIENT_MODES.BACKEND,
+  });
+}
