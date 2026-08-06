@@ -174,6 +174,7 @@ const {
   formatGatewayTransportErrorJson,
   isGatewayTransportError,
 } = await import("./call.js");
+const { callGateway: callGatewayFromPluginSdk } = await import("../plugin-sdk/gateway-runtime.js");
 
 class StubGatewayClient {
   constructor(opts: {
@@ -694,6 +695,19 @@ describe("callGateway url resolution", () => {
     setLocalLoopbackGatewayConfig();
     await call();
     expect(lastClientOptions?.scopes).toEqual(expectedScopes);
+  });
+
+  it("keeps the stable plugin SDK Gateway call least-privilege and backend-scoped", async () => {
+    await callGatewayFromPluginSdk({
+      method: "health",
+      url: "ws://127.0.0.1:18789",
+      token: "explicit-token",
+    });
+
+    expect(lastClientOptions?.clientName).toBe(GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT);
+    expect(lastClientOptions?.mode).toBe(GATEWAY_CLIENT_MODES.BACKEND);
+    expect(lastClientOptions?.scopes).toEqual(["operator.read"]);
+    expect(lastClientOptions?.deviceIdentity).toBeNull();
   });
 
   it("keeps legacy broad scopes for unclassified explicit CLI methods", async () => {
