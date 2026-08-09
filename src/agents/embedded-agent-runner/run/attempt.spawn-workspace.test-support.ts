@@ -124,7 +124,12 @@ export function createSubscriptionMock(): SubscriptionMock {
     getUsageTotals: () => undefined,
     getCompactionCount: () => 0,
     getLastCompactionTokensAfter: () => undefined,
-    getItemLifecycle: () => ({ startedCount: 0, completedCount: 0, activeCount: 0 }),
+    getItemLifecycle: () => ({
+      startedCount: 0,
+      completedCount: 0,
+      activeCount: 0,
+      activeItemIds: [],
+    }),
     isCompacting: () => false,
     isCompactionInFlight: () => false,
   };

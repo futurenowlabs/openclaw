@@ -188,6 +188,8 @@ export type EmbeddedRunAttemptResult = {
     startedCount: number;
     completedCount: number;
     activeCount: number;
+    /** Producer-owned identity for fail-closed stale-lifecycle correlation. */
+    activeItemIds?: string[];
   };
   setTerminalLifecycleMeta?: (meta: {
     replayInvalid?: boolean;

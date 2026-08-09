@@ -23,6 +23,7 @@ import type { CommandQueueEnqueueOptions } from "../../process/command-queue.typ
 import { createAgentHarnessTaskRuntimeScope } from "../../tasks/agent-harness-task-runtime-scope.js";
 import { resolveUserPath } from "../../utils.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
+import { hasAcceptedSessionSpawn } from "../accepted-session-spawn.js";
 import {
   retireSessionMcpRuntime,
   retireSessionMcpRuntimeForSessionKey,
@@ -170,6 +171,7 @@ import {
   resolvePlanningOnlyRetryLimit,
   resolvePlanningOnlyRetryInstruction,
   resolveReasoningOnlyRetryInstruction,
+  resolveSettledToolTerminalContinuationInstruction,
   resolveSilentToolResultReplyPayload,
   STRICT_AGENTIC_BLOCKED_TEXT,
   resolveReplayInvalidFlag,
@@ -403,6 +405,27 @@ function buildTraceToolSummary(params: {
     calls: params.toolMetas?.length ?? 0,
     tools,
     failures: params.hadFailure ? 1 : 0,
+  };
+}
+
+function mergeTraceToolSummaries(
+  first: ToolSummaryTrace | undefined,
+  second: ToolSummaryTrace | undefined,
+): ToolSummaryTrace | undefined {
+  if (!first) {
+    return second;
+  }
+  if (!second) {
+    return first;
+  }
+  return {
+    calls: first.calls + second.calls,
+    tools: [...new Set([...first.tools, ...second.tools])],
+    failures: (first.failures ?? 0) + (second.failures ?? 0),
+    totalToolTimeMs:
+      typeof first.totalToolTimeMs === "number" || typeof second.totalToolTimeMs === "number"
+        ? (first.totalToolTimeMs ?? 0) + (second.totalToolTimeMs ?? 0)
+        : undefined,
   };
 }
 
@@ -1233,6 +1256,10 @@ export async function runEmbeddedAgent(
       let emptyErrorRetries = 0;
       const MAX_MISSING_ASSISTANT_RETRIES = 1;
       let missingAssistantRetryAttempts = 0;
+      let settledToolFinalizationPending = false;
+      let settledToolFinalizationAttempted = false;
+      let settledToolFinalizationFallback: EmbeddedAgentRunResult | undefined;
+      let settledToolFinalizationToolSummary: ToolSummaryTrace | undefined;
       const overloadFailoverBackoffMs = resolveOverloadFailoverBackoffMs(params.config);
       const overloadProfileRotationLimit = resolveOverloadProfileRotationLimit(params.config);
       const rateLimitProfileRotationLimit = resolveRateLimitProfileRotationLimit(params.config);
@@ -1470,6 +1497,8 @@ export async function runEmbeddedAgent(
             });
           }
           runLoopIterations += 1;
+          const settledToolFinalizationActive = settledToolFinalizationPending;
+          settledToolFinalizationPending = false;
           const runtimeAuthRetry = authRetryPending;
           authRetryPending = false;
           attemptedThinking.add(thinkLevel);
@@ -1482,13 +1511,17 @@ export async function runEmbeddedAgent(
             nextAttemptPromptOverride ??
             (provider === "anthropic" ? scrubAnthropicRefusalMagic(params.prompt) : params.prompt);
           nextAttemptPromptOverride = null;
-          const promptAdditions = [
-            ackExecutionFastPathInstruction,
-            planningOnlyRetryInstruction,
-            reasoningOnlyRetryInstruction,
-            emptyResponseRetryInstruction,
-            compactionContinuationRetryInstruction,
-          ].filter(
+          const promptAdditions = (
+            settledToolFinalizationActive
+              ? []
+              : [
+                  ackExecutionFastPathInstruction,
+                  planningOnlyRetryInstruction,
+                  reasoningOnlyRetryInstruction,
+                  emptyResponseRetryInstruction,
+                  compactionContinuationRetryInstruction,
+                ]
+          ).filter(
             (value): value is string => typeof value === "string" && value.trim().length > 0,
           );
           const prompt =
@@ -1596,7 +1629,7 @@ export async function runEmbeddedAgent(
             images: params.images,
             imageOrder: params.imageOrder,
             clientTools: params.clientTools,
-            disableTools: params.disableTools,
+            disableTools: settledToolFinalizationActive ? true : params.disableTools,
             provider,
             modelId,
             // Use the harness selected before model/auth setup for the actual
@@ -1720,6 +1753,16 @@ export async function runEmbeddedAgent(
             currentAttemptAssistant,
           } = attempt;
           const timedOutDuringToolExecution = attempt.timedOutDuringToolExecution ?? false;
+          if (
+            settledToolFinalizationActive &&
+            (aborted || promptError || timedOut || sessionLastAssistant?.stopReason === "error")
+          ) {
+            attempt.setTerminalLifecycleMeta?.({
+              replayInvalid: true,
+              livenessState: "abandoned",
+            });
+            return settledToolFinalizationFallback!;
+          }
           if (sessionIdUsed && sessionIdUsed !== activeSessionId) {
             activeSessionId = sessionIdUsed;
             // Track the live session for lifecycle persistence identity (#88538).
@@ -2916,8 +2959,12 @@ export async function runEmbeddedAgent(
             compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
             compactionTokensAfter: lastCompactionTokensAfter,
           };
-          const finalAssistantVisibleText = resolveFinalAssistantVisibleText(sessionLastAssistant);
-          const finalAssistantRawText = resolveFinalAssistantRawText(sessionLastAssistant);
+          // The current attempt owns terminal presentation. A prior assistant
+          // message must not satisfy a fresh finalization attempt when the
+          // current attempt produced no explicit final (#118489).
+          const terminalAssistant = currentAttemptAssistant ?? sessionLastAssistant;
+          const finalAssistantVisibleText = resolveFinalAssistantVisibleText(terminalAssistant);
+          const finalAssistantRawText = resolveFinalAssistantRawText(terminalAssistant);
 
           const payloads = buildEmbeddedRunPayloads({
             assistantTexts: attempt.assistantTexts,
@@ -2992,10 +3039,13 @@ export async function runEmbeddedAgent(
             !attempt.didSendDeterministicApprovalPrompt &&
             !attempt.lastToolError &&
             (attempt.toolMetas?.length ?? 0) === 0;
-          const attemptToolSummary = buildTraceToolSummary({
+          const currentAttemptToolSummary = buildTraceToolSummary({
             toolMetas: attempt.toolMetas,
             hadFailure: Boolean(attempt.lastToolError),
           });
+          const attemptToolSummary = settledToolFinalizationActive
+            ? mergeTraceToolSummaries(settledToolFinalizationToolSummary, currentAttemptToolSummary)
+            : currentAttemptToolSummary;
           const failureSignal = resolveEmbeddedRunFailureSignal({
             trigger: params.trigger,
             lastToolError: attempt.lastToolError,
@@ -3087,6 +3137,105 @@ export async function runEmbeddedAgent(
                 ? [silentToolResultReplyPayload]
                 : payloadsWithToolMedia;
           const payloadCount = payloadsForTerminalPath?.length ?? 0;
+          const isolatedFinalizationHasExplicitFinal =
+            Boolean(currentAttemptAssistant) &&
+            Boolean(finalAssistantVisibleText?.trim()) &&
+            ["completed", "end_turn", "stop"].includes(
+              (currentAttemptAssistant?.stopReason ?? "").trim().toLowerCase(),
+            ) &&
+            (attempt.toolMetas?.length ?? 0) === 0 &&
+            (attempt.itemLifecycle?.startedCount ?? 0) === 0 &&
+            (attempt.itemLifecycle?.completedCount ?? 0) === 0 &&
+            (attempt.itemLifecycle?.activeCount ?? 0) === 0 &&
+            !attempt.lastToolError &&
+            !attempt.clientToolCalls &&
+            !attempt.yieldDetected &&
+            !attempt.didSendViaMessagingTool &&
+            !attempt.didSendDeterministicApprovalPrompt &&
+            !hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns) &&
+            !(attempt.toolMetas ?? []).some((tool) => tool.asyncStarted === true);
+          if (settledToolFinalizationActive && !isolatedFinalizationHasExplicitFinal) {
+            attempt.setTerminalLifecycleMeta?.({
+              replayInvalid: true,
+              livenessState: "abandoned",
+            });
+            return settledToolFinalizationFallback!;
+          }
+          const hasOnlySyntheticToolErrorPayload =
+            terminalAssistant?.stopReason === "toolUse" &&
+            Boolean(attempt.lastToolError) &&
+            (attempt.assistantTexts ?? []).every((text) => text.trim().length === 0) &&
+            Boolean(payloadsWithToolMedia?.length) &&
+            (payloadsWithToolMedia ?? []).every((payload) => {
+              const keys = Object.keys(payload);
+              return (
+                payload.isError === true && keys.every((key) => key === "text" || key === "isError")
+              );
+            });
+          const settledToolTerminalContinuationInstruction =
+            !settledToolFinalizationActive &&
+            !settledToolFinalizationAttempted &&
+            agentHarness.id === "openclaw"
+              ? resolveSettledToolTerminalContinuationInstruction({
+                  provider: activeErrorContext.provider,
+                  modelId: activeErrorContext.model,
+                  modelApi: effectiveModel.api,
+                  executionContract,
+                  payloadCount: hasOnlySyntheticToolErrorPayload ? 0 : payloadCount,
+                  aborted,
+                  promptError,
+                  timedOut,
+                  attempt,
+                })
+              : null;
+          if (settledToolTerminalContinuationInstruction) {
+            const replayInvalid = true;
+            const livenessState: EmbeddedRunLivenessState = "abandoned";
+            settledToolFinalizationFallback = {
+              payloads: [
+                {
+                  text: "⚠️ Agent couldn't generate a response. Note: some tool actions may have already been executed — please verify before retrying.",
+                  isError: true,
+                },
+              ],
+              meta: {
+                durationMs: Date.now() - started,
+                agentMeta,
+                aborted,
+                systemPromptReport: attempt.systemPromptReport,
+                finalPromptText: attempt.finalPromptText,
+                finalAssistantVisibleText,
+                finalAssistantRawText,
+                replayInvalid,
+                livenessState,
+                toolSummary: currentAttemptToolSummary,
+                ...(failureSignal ? { failureSignal } : {}),
+                agentHarnessResultClassification: attempt.agentHarnessResultClassification,
+              },
+              didSendViaMessagingTool: attempt.didSendViaMessagingTool,
+              didSendDeterministicApprovalPrompt: attempt.didSendDeterministicApprovalPrompt,
+              messagingToolSentTexts: attempt.messagingToolSentTexts,
+              messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
+              messagingToolSentTargets: attempt.messagingToolSentTargets,
+              messagingToolSourceReplyPayloads: attempt.messagingToolSourceReplyPayloads,
+              heartbeatToolResponse: attempt.heartbeatToolResponse,
+              successfulCronAdds: attempt.successfulCronAdds,
+              acceptedSessionSpawns: attempt.acceptedSessionSpawns,
+            };
+            settledToolFinalizationToolSummary = currentAttemptToolSummary;
+            settledToolFinalizationAttempted = true;
+            settledToolFinalizationPending = true;
+            nextAttemptPromptOverride = settledToolTerminalContinuationInstruction;
+            suppressNextUserMessagePersistence = true;
+            planningOnlyRetryInstruction = null;
+            reasoningOnlyRetryInstruction = null;
+            emptyResponseRetryInstruction = null;
+            compactionContinuationRetryInstruction = null;
+            log.warn(
+              `settled post-tool turn lacked a final answer: runId=${params.runId} sessionId=${params.sessionId} — running one isolated tool-disabled finalization`,
+            );
+            continue;
+          }
           const emptyAssistantReplyIsSilent = shouldTreatEmptyAssistantReplyAsSilent({
             allowEmptyAssistantReplyAsSilent: params.allowEmptyAssistantReplyAsSilent,
             payloadCount,

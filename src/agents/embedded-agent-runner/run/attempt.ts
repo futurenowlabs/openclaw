@@ -4554,18 +4554,21 @@ export async function runEmbeddedAttempt(
               );
             }
           }
+          const modelMessagesSnapshot = snapshotSelection.messagesSnapshot;
           messagesSnapshot = projectToolSearchTargetTranscriptMessages(
-            snapshotSelection.messagesSnapshot,
+            modelMessagesSnapshot,
             toolSearchTargetTranscriptProjections,
           );
           sessionIdUsed = snapshotSelection.sessionIdUsed;
 
-          lastAssistant = messagesSnapshot
+          // Projected target-tool assistants are transcript evidence, not model turns.
+          // They must not own terminal state for the parent tool batch.
+          lastAssistant = modelMessagesSnapshot
             .slice()
             .toReversed()
             .find((message): message is AssistantMessage => message.role === "assistant");
           currentAttemptAssistant = findCurrentAttemptAssistantMessage({
-            messagesSnapshot,
+            messagesSnapshot: modelMessagesSnapshot,
             prePromptMessageCount,
           });
           attemptUsage = getUsageTotals();
