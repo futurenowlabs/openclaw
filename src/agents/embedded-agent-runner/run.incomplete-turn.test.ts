@@ -120,6 +120,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     prompt?: string;
     disableTools?: boolean;
     suppressNextUserMessagePersistence?: boolean;
+    toolsAllow?: string[];
   } {
     const call = mockedRunEmbeddedAttempt.mock.calls[index];
     if (!call) {
@@ -129,6 +130,7 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
       prompt?: string;
       disableTools?: boolean;
       suppressNextUserMessagePersistence?: boolean;
+      toolsAllow?: string[];
     };
   }
 
@@ -2840,15 +2842,18 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
         provider: "openai",
         model: "gpt-5.4",
         agentHarnessRuntimeOverride: "openclaw",
+        toolsAllow: ["read"],
         trigger,
         runId: `run-settled-tool-finalization-${trigger}`,
       });
 
       expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+      expect(runAttemptCall(0)).toMatchObject({ toolsAllow: ["read"] });
       expect(runAttemptCall(1)).toMatchObject({
         prompt: `${SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION} If any tool failed, state that failure plainly and do not claim it succeeded.`,
         disableTools: true,
         suppressNextUserMessagePersistence: true,
+        toolsAllow: undefined,
       });
       expect(result.payloads).toEqual([{ text: "The tool failed; no change was made." }]);
       expect(result.meta.finalAssistantVisibleText).toBe("The tool failed; no change was made.");

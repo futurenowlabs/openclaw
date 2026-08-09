@@ -1705,7 +1705,11 @@ export async function runEmbeddedAgent(
             bootstrapContextMode: params.bootstrapContextMode,
             bootstrapContextRunKind: params.bootstrapContextRunKind,
             jobId: params.jobId,
-            toolsAllow: params.toolsAllow,
+            // The canonical shared-owner finalizer bypasses ordinary tool
+            // construction entirely. On this release line the finalizer still
+            // re-enters the ordinary attempt path, so an explicit allowlist
+            // plus disableTools would fail preflight before reaching the model.
+            toolsAllow: settledToolFinalizationActive ? undefined : params.toolsAllow,
             disableMessageTool: params.disableMessageTool,
             forceMessageTool: params.forceMessageTool,
             enableHeartbeatTool: params.enableHeartbeatTool,
