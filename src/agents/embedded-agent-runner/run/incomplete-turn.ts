@@ -659,15 +659,44 @@ export function resolveSettledToolTerminalContinuationInstruction(params: {
   modelId?: string;
   modelApi?: string;
   executionContract?: string;
+  allowEmptyStopContinuation?: boolean;
   payloadCount: number;
   aborted: boolean;
   promptError?: unknown;
   timedOut: boolean;
   attempt: IncompleteTurnAttempt;
 }): string | null {
-  const assistant = params.attempt.currentAttemptAssistant ?? params.attempt.lastAssistant;
-  const requestedToolCalls = Array.isArray(assistant?.content)
-    ? assistant.content.flatMap((item) => {
+  const terminalAssistant = params.attempt.currentAttemptAssistant ?? params.attempt.lastAssistant;
+  const snapshot = params.attempt.messagesSnapshot ?? [];
+  const terminalAssistantIndex = terminalAssistant ? snapshot.indexOf(terminalAssistant) : -1;
+  const currentTurnStartIndex = snapshot.findLastIndex(
+    (message, index) =>
+      index < terminalAssistantIndex && (message as { role?: unknown }).role === "user",
+  );
+  const emptyStopAfterTools = Boolean(
+    params.allowEmptyStopContinuation &&
+    terminalAssistant?.stopReason === "stop" &&
+    terminalAssistantIndex >= 0 &&
+    currentTurnStartIndex >= 0 &&
+    isEmptyResponseAssistantTurn({ payloadCount: params.payloadCount, attempt: params.attempt }),
+  );
+  const toolAssistant =
+    terminalAssistant?.stopReason === "toolUse"
+      ? terminalAssistant
+      : emptyStopAfterTools
+        ? snapshot
+            .slice(currentTurnStartIndex + 1, terminalAssistantIndex)
+            .toReversed()
+            .find(
+              (message) =>
+                (message as { role?: unknown; stopReason?: unknown }).role === "assistant" &&
+                (message as { stopReason?: unknown }).stopReason === "toolUse",
+            )
+        : undefined;
+  const requestedToolCalls = Array.isArray(
+    (toolAssistant as { content?: unknown } | undefined)?.content,
+  )
+    ? (toolAssistant as { content: unknown[] }).content.flatMap((item) => {
         const block = item as { type?: unknown; id?: unknown; name?: unknown } | null;
         return block?.type === "toolCall"
           ? [
@@ -679,10 +708,23 @@ export function resolveSettledToolTerminalContinuationInstruction(params: {
           : [];
       })
     : [];
-  const snapshot = params.attempt.messagesSnapshot ?? [];
-  const assistantIndex = assistant ? snapshot.indexOf(assistant) : -1;
+  const assistantIndex = toolAssistant ? snapshot.indexOf(toolAssistant) : -1;
+  const toolAssistantStopReason = (toolAssistant as { stopReason?: unknown } | undefined)
+    ?.stopReason;
+  const resultWindowEnd = emptyStopAfterTools ? terminalAssistantIndex : snapshot.length;
+  const resultWindow =
+    assistantIndex >= 0 && resultWindowEnd > assistantIndex
+      ? snapshot.slice(assistantIndex + 1, resultWindowEnd)
+      : [];
+  const hasInterveningVisibleAssistant = resultWindow.some((message) => {
+    const candidate = message as { role?: unknown; content?: unknown };
+    return (
+      candidate.role === "assistant" &&
+      collectTextContentBlocks(candidate.content).some((text) => text.trim().length > 0)
+    );
+  });
   const settledToolResults = new Map(
-    (assistantIndex >= 0 ? snapshot.slice(assistantIndex + 1) : []).flatMap((message) => {
+    resultWindow.flatMap((message) => {
       const result = message as {
         role?: unknown;
         toolCallId?: unknown;
@@ -739,7 +781,7 @@ export function resolveSettledToolTerminalContinuationInstruction(params: {
   const hasSettledTerminalToolFailure = allToolsProvenSettled && failedTerminalToolNames.size > 0;
   const hasUnsettledToolError = Boolean(
     params.attempt.lastToolError &&
-    (assistant?.stopReason !== "toolUse" ||
+    (toolAssistantStopReason !== "toolUse" ||
       !hasSettledTerminalToolFailure ||
       !failedTerminalToolNames.has(params.attempt.lastToolError.toolName)),
   );
@@ -748,7 +790,10 @@ export function resolveSettledToolTerminalContinuationInstruction(params: {
     params.aborted ||
     params.promptError != null ||
     params.timedOut ||
-    assistant?.stopReason !== "toolUse" ||
+    (terminalAssistant?.stopReason === "toolUse"
+      ? toolAssistant !== terminalAssistant
+      : !emptyStopAfterTools) ||
+    hasInterveningVisibleAssistant ||
     !allToolsProvenSettled ||
     hasUnsettledToolError ||
     (hasSettledTerminalToolFailure &&

@@ -3162,7 +3162,6 @@ export async function runEmbeddedAgent(
             return settledToolFinalizationFallback!;
           }
           const hasOnlySyntheticToolErrorPayload =
-            terminalAssistant?.stopReason === "toolUse" &&
             Boolean(attempt.lastToolError) &&
             (attempt.assistantTexts ?? []).every((text) => text.trim().length === 0) &&
             Boolean(payloadsWithToolMedia?.length) &&
@@ -3181,6 +3180,11 @@ export async function runEmbeddedAgent(
                   modelId: activeErrorContext.model,
                   modelApi: effectiveModel.api,
                   executionContract,
+                  allowEmptyStopContinuation:
+                    params.trigger == null ||
+                    params.trigger === "user" ||
+                    params.trigger === "manual" ||
+                    params.trigger === "cron",
                   payloadCount: hasOnlySyntheticToolErrorPayload ? 0 : payloadCount,
                   aborted,
                   promptError,

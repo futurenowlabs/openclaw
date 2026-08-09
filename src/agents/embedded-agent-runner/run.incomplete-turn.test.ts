@@ -2856,6 +2856,62 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     },
   );
 
+  it("finalizes a settled failed tool after the provider returns an empty stop", async () => {
+    const postToolAttempt = makeSettledFailedToolAttempt();
+    const toolUseAssistant = postToolAttempt.currentAttemptAssistant!;
+    const toolResult = postToolAttempt.messagesSnapshot[1];
+    const emptyStopAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.4",
+      content: [],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    postToolAttempt.lastAssistant = emptyStopAssistant;
+    postToolAttempt.currentAttemptAssistant = emptyStopAssistant;
+    postToolAttempt.messagesSnapshot = [
+      { role: "user", content: [{ type: "text", text: "synthetic request" }] },
+      toolUseAssistant,
+      toolResult,
+      emptyStopAssistant,
+    ] as EmbeddedRunAttemptResult["messagesSnapshot"];
+    const finalAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.4",
+      content: [{ type: "text", text: "The tool failed; no change was made." }],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    mockedBuildEmbeddedRunPayloads
+      .mockReturnValueOnce([{ text: "sanitized tool failure", isError: true }])
+      .mockReturnValueOnce([{ text: "The tool failed; no change was made." }]);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(postToolAttempt).mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: ["The tool failed; no change was made."],
+        lastAssistant: finalAssistant,
+        currentAttemptAssistant: finalAssistant,
+      }),
+    );
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "openai",
+      model: "gpt-5.4",
+      agentHarnessRuntimeOverride: "openclaw",
+      trigger: "cron",
+      runId: "run-settled-tool-empty-stop-finalization",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(runAttemptCall(1)).toMatchObject({
+      prompt: `${SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION} If any tool failed, state that failure plainly and do not claim it succeeded.`,
+      disableTools: true,
+      suppressNextUserMessagePersistence: true,
+    });
+    expect(result.payloads).toEqual([{ text: "The tool failed; no change was made." }]);
+  });
+
   it("fails closed without a third attempt when isolated finalization has no explicit final", async () => {
     mockedClassifyFailoverReason.mockReturnValue(null);
     mockedBuildEmbeddedRunPayloads
@@ -3028,6 +3084,58 @@ describe("resolveSettledToolTerminalContinuationInstruction", () => {
       resolveSettledToolTerminalContinuationInstruction({
         ...baseParams,
         attempt: makeSettledFailedToolAttempt({ lastToolErrorName: "read" }),
+      }),
+    ).toBeNull();
+  });
+
+  it("uses the exact same-turn settled batch when the provider terminates with an empty stop", () => {
+    const attempt = makeSettledFailedToolAttempt();
+    const toolUseAssistant = attempt.currentAttemptAssistant!;
+    const toolResult = attempt.messagesSnapshot[1];
+    const emptyStopAssistant = {
+      role: "assistant",
+      stopReason: "stop",
+      provider: "openai",
+      model: "gpt-5.4",
+      content: [],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
+    attempt.lastAssistant = emptyStopAssistant;
+    attempt.currentAttemptAssistant = emptyStopAssistant;
+    attempt.messagesSnapshot = [
+      { role: "user", content: [{ type: "text", text: "synthetic request" }] },
+      toolUseAssistant,
+      toolResult,
+      emptyStopAssistant,
+    ] as EmbeddedRunAttemptResult["messagesSnapshot"];
+
+    expect(
+      resolveSettledToolTerminalContinuationInstruction({
+        ...baseParams,
+        allowEmptyStopContinuation: true,
+        attempt,
+      }),
+    ).toBe(
+      `${SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION} If any tool failed, state that failure plainly and do not claim it succeeded.`,
+    );
+    expect(
+      resolveSettledToolTerminalContinuationInstruction({
+        ...baseParams,
+        allowEmptyStopContinuation: false,
+        attempt,
+      }),
+    ).toBeNull();
+
+    attempt.messagesSnapshot = [
+      toolUseAssistant,
+      toolResult,
+      { role: "user", content: [{ type: "text", text: "different turn" }] },
+      emptyStopAssistant,
+    ] as EmbeddedRunAttemptResult["messagesSnapshot"];
+    expect(
+      resolveSettledToolTerminalContinuationInstruction({
+        ...baseParams,
+        allowEmptyStopContinuation: true,
+        attempt,
       }),
     ).toBeNull();
   });
