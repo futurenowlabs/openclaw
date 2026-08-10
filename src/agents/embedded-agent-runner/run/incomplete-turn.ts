@@ -53,7 +53,7 @@ type IncompleteTurnAttempt = Pick<
   | "timedOutDuringCompaction"
   | "toolMetas"
 > &
-  Partial<Pick<EmbeddedRunAttemptResult, "acceptedSessionSpawns">>;
+  Partial<Pick<EmbeddedRunAttemptResult, "acceptedSessionSpawns" | "messagesSnapshot">>;
 
 type PlanningOnlyAttempt = Pick<
   EmbeddedRunAttemptResult,
@@ -220,6 +220,8 @@ export const REASONING_ONLY_RETRY_INSTRUCTION =
   "The previous assistant turn recorded reasoning but did not produce a user-visible answer. Continue from that partial turn and produce the visible answer now. Do not restate the reasoning or restart from scratch.";
 export const EMPTY_RESPONSE_RETRY_INSTRUCTION =
   "The previous attempt did not produce a user-visible answer. Continue from the current state and produce the visible answer now. Do not restart from scratch.";
+export const SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION =
+  "The previous assistant turn completed its tool calls but did not produce a user-visible answer. Continue from the current transcript and produce the final user-visible answer now. Do not repeat completed tool calls or restart from scratch.";
 export const ACK_EXECUTION_FAST_PATH_INSTRUCTION =
   "The latest user message is a short approval to proceed. Do not recap or restate the plan. Start with the first concrete tool action immediately. Keep any user-facing follow-up brief and natural.";
 export const STRICT_AGENTIC_BLOCKED_TEXT =
@@ -643,6 +645,182 @@ export function resolveReasoningOnlyRetryInstruction(params: {
   }
 
   return REASONING_ONLY_RETRY_INSTRUCTION;
+}
+
+/**
+ * Backport of the shared embedded-runner owner from upstream #118344.
+ * Settlement is proven by exact current-batch call id + tool owner matches;
+ * a failed result is settled, not successful. The #118489 stale-lifecycle
+ * residual is admitted only when every reported active item belongs to that
+ * exact persisted failed batch and no async/child owner remains.
+ */
+export function resolveSettledToolTerminalContinuationInstruction(params: {
+  provider?: string;
+  modelId?: string;
+  modelApi?: string;
+  executionContract?: string;
+  allowEmptyStopContinuation?: boolean;
+  payloadCount: number;
+  aborted: boolean;
+  promptError?: unknown;
+  timedOut: boolean;
+  attempt: IncompleteTurnAttempt;
+}): string | null {
+  const terminalAssistant = params.attempt.currentAttemptAssistant ?? params.attempt.lastAssistant;
+  const snapshot = params.attempt.messagesSnapshot ?? [];
+  const terminalAssistantIndex = terminalAssistant ? snapshot.indexOf(terminalAssistant) : -1;
+  const currentTurnStartIndex = snapshot.findLastIndex(
+    (message, index) =>
+      index < terminalAssistantIndex && (message as { role?: unknown }).role === "user",
+  );
+  const emptyStopAfterTools = Boolean(
+    params.allowEmptyStopContinuation &&
+    terminalAssistant?.stopReason === "stop" &&
+    terminalAssistantIndex >= 0 &&
+    currentTurnStartIndex >= 0 &&
+    isEmptyResponseAssistantTurn({ payloadCount: params.payloadCount, attempt: params.attempt }),
+  );
+  const toolAssistant =
+    terminalAssistant?.stopReason === "toolUse"
+      ? terminalAssistant
+      : emptyStopAfterTools
+        ? snapshot
+            .slice(currentTurnStartIndex + 1, terminalAssistantIndex)
+            .toReversed()
+            .find(
+              (message) =>
+                (message as { role?: unknown; stopReason?: unknown }).role === "assistant" &&
+                (message as { stopReason?: unknown }).stopReason === "toolUse",
+            )
+        : undefined;
+  const requestedToolCalls = Array.isArray(
+    (toolAssistant as { content?: unknown } | undefined)?.content,
+  )
+    ? (toolAssistant as { content: unknown[] }).content.flatMap((item) => {
+        const block = item as { type?: unknown; id?: unknown; name?: unknown } | null;
+        return block?.type === "toolCall"
+          ? [
+              {
+                id: typeof block.id === "string" ? block.id : null,
+                name: typeof block.name === "string" ? block.name : null,
+              },
+            ]
+          : [];
+      })
+    : [];
+  const assistantIndex = toolAssistant ? snapshot.indexOf(toolAssistant) : -1;
+  const toolAssistantStopReason = (toolAssistant as { stopReason?: unknown } | undefined)
+    ?.stopReason;
+  const resultWindowEnd = emptyStopAfterTools ? terminalAssistantIndex : snapshot.length;
+  const resultWindow =
+    assistantIndex >= 0 && resultWindowEnd > assistantIndex
+      ? snapshot.slice(assistantIndex + 1, resultWindowEnd)
+      : [];
+  const hasInterveningVisibleAssistant = resultWindow.some((message) => {
+    const candidate = message as { role?: unknown; content?: unknown };
+    return (
+      candidate.role === "assistant" &&
+      collectTextContentBlocks(candidate.content).some((text) => text.trim().length > 0)
+    );
+  });
+  const settledToolResults = new Map(
+    resultWindow.flatMap((message) => {
+      const result = message as {
+        role?: unknown;
+        toolCallId?: unknown;
+        toolName?: unknown;
+        isError?: unknown;
+      };
+      return result.role === "toolResult" &&
+        typeof result.toolCallId === "string" &&
+        typeof result.toolName === "string"
+        ? [
+            [
+              result.toolCallId,
+              { toolName: result.toolName, isError: result.isError === true },
+            ] as const,
+          ]
+        : [];
+    }),
+  );
+  const allRequestedToolsHavePersistedResults =
+    requestedToolCalls.length > 0 &&
+    requestedToolCalls.every(
+      ({ id, name }) =>
+        id !== null && name !== null && settledToolResults.get(id)?.toolName === name,
+    );
+  const failedTerminalToolNames = new Set(
+    requestedToolCalls.flatMap(({ id, name }) =>
+      id !== null && name !== null && settledToolResults.get(id)?.isError === true ? [name] : [],
+    ),
+  );
+  const hasPersistedTerminalFailure =
+    allRequestedToolsHavePersistedResults && failedTerminalToolNames.size > 0;
+  const activeItemIds = params.attempt.itemLifecycle?.activeItemIds;
+  const everyActiveItemBelongsToSettledBatch =
+    Array.isArray(activeItemIds) &&
+    activeItemIds.length === (params.attempt.itemLifecycle?.activeCount ?? 0) &&
+    activeItemIds.every((itemId) =>
+      requestedToolCalls.some(
+        ({ id }) =>
+          id !== null &&
+          (itemId === id ||
+            itemId === `tool:${id}` ||
+            itemId === `command:${id}` ||
+            itemId === `patch:${id}`) &&
+          settledToolResults.get(id) !== undefined,
+      ),
+    );
+  const lifecycleIsSettled =
+    params.attempt.itemLifecycle?.activeCount === 0 ||
+    (hasPersistedTerminalFailure &&
+      everyActiveItemBelongsToSettledBatch &&
+      !hasAsyncStartedToolActivity(params.attempt.toolMetas) &&
+      !hasAcceptedSessionSpawn(params.attempt.acceptedSessionSpawns));
+  const allToolsProvenSettled = allRequestedToolsHavePersistedResults && lifecycleIsSettled;
+  const hasSettledTerminalToolFailure = allToolsProvenSettled && failedTerminalToolNames.size > 0;
+  const hasUnsettledToolError = Boolean(
+    params.attempt.lastToolError &&
+    (toolAssistantStopReason !== "toolUse" ||
+      !hasSettledTerminalToolFailure ||
+      !failedTerminalToolNames.has(params.attempt.lastToolError.toolName)),
+  );
+  if (
+    params.payloadCount !== 0 ||
+    params.aborted ||
+    params.promptError != null ||
+    params.timedOut ||
+    (terminalAssistant?.stopReason === "toolUse"
+      ? toolAssistant !== terminalAssistant
+      : !emptyStopAfterTools) ||
+    hasInterveningVisibleAssistant ||
+    !allToolsProvenSettled ||
+    hasUnsettledToolError ||
+    (hasSettledTerminalToolFailure &&
+      (hasAsyncStartedToolActivity(params.attempt.toolMetas) ||
+        hasAcceptedSessionSpawn(params.attempt.acceptedSessionSpawns))) ||
+    params.attempt.clientToolCalls ||
+    params.attempt.yieldDetected ||
+    params.attempt.didSendDeterministicApprovalPrompt
+  ) {
+    return null;
+  }
+  if (hasMessagingToolDeliveryEvidence(params.attempt)) {
+    return null;
+  }
+  if (
+    !shouldApplyNonVisibleTurnRetryGuard({
+      provider: params.provider,
+      modelId: params.modelId,
+      modelApi: params.modelApi,
+      executionContract: params.executionContract,
+    })
+  ) {
+    return null;
+  }
+  return hasSettledTerminalToolFailure
+    ? `${SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION} If any tool failed, state that failure plainly and do not claim it succeeded.`
+    : SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION;
 }
 
 export function resolveEmptyResponseRetryInstruction(params: {
