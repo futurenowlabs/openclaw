@@ -134,6 +134,13 @@ export type EmbeddedRunFailureSignal = {
   fatalForCron: true;
 };
 
+export type SettledToolFinalizationTrace = {
+  contractVersion: "openclaw.settled-tool-terminal-finalization.v1";
+  owner: "embedded-agent-runner";
+  harnessClass: "builtin" | "plugin";
+  outcome: "final" | "fallback";
+};
+
 export type EmbeddedAgentRunMeta = {
   durationMs: number;
   agentMeta?: EmbeddedAgentMeta;
@@ -172,6 +179,7 @@ export type EmbeddedAgentRunMeta = {
   requestShaping?: RequestShapingTrace;
   promptSegments?: PromptSegmentTrace[];
   toolSummary?: ToolSummaryTrace;
+  settledToolFinalization?: SettledToolFinalizationTrace;
   completion?: CompletionTrace;
   contextManagement?: ContextManagementTrace;
 };

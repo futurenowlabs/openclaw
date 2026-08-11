@@ -16,6 +16,9 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
         finalUserVisibleResult: true,
         toolCallCount: 1,
         toolFailureCount: 0,
+        settledToolFinalizationAttempted: true,
+        settledToolFinalizationOutcome: "final",
+        settledToolFinalizationHarnessClass: "plugin",
         publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
         publicTextSha256: "a".repeat(64),
         privateDetail: "must-not-survive",
@@ -30,6 +33,9 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
       finalUserVisibleResult: true,
       toolCallCount: 1,
       toolFailureCount: 0,
+      settledToolFinalizationAttempted: true,
+      settledToolFinalizationOutcome: "final",
+      settledToolFinalizationHarnessClass: "plugin",
       publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
       publicTextSha256: "a".repeat(64),
     });
@@ -50,6 +56,9 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
         finalUserVisibleResult: true,
         toolCallCount: 1,
         toolFailureCount: 2,
+        settledToolFinalizationAttempted: false,
+        settledToolFinalizationOutcome: "not_applicable",
+        settledToolFinalizationHarnessClass: "none",
       },
     });
 
@@ -70,6 +79,9 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
         finalUserVisibleResult: true,
         toolCallCount: 0,
         toolFailureCount: 0,
+        settledToolFinalizationAttempted: false,
+        settledToolFinalizationOutcome: "not_applicable",
+        settledToolFinalizationHarnessClass: "none",
       },
     });
 
@@ -90,7 +102,35 @@ describe("parseCronRunLogEntryObject assistant completion", () => {
         finalUserVisibleResult: true,
         toolCallCount: 0,
         toolFailureCount: 0,
+        settledToolFinalizationAttempted: false,
+        settledToolFinalizationOutcome: "not_applicable",
+        settledToolFinalizationHarnessClass: "none",
         publicTextProjection: "unreviewed-public-projection",
+        publicTextSha256: "a".repeat(64),
+      },
+    });
+
+    expect(result?.assistantCompletion).toBeUndefined();
+  });
+
+  it("drops inconsistent settled-tool finalization evidence", () => {
+    const result = parseCronRunLogEntryObject({
+      ts: 1,
+      jobId: "fixture-job",
+      action: "finished",
+      status: "ok",
+      assistantCompletion: {
+        contractVersion: "openclaw.cron-assistant-completion.v1",
+        toolCallDetected: true,
+        toolResultAccepted: true,
+        finalAssistantVisible: true,
+        finalUserVisibleResult: true,
+        toolCallCount: 1,
+        toolFailureCount: 1,
+        settledToolFinalizationAttempted: true,
+        settledToolFinalizationOutcome: "fallback",
+        settledToolFinalizationHarnessClass: "plugin",
+        publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
         publicTextSha256: "a".repeat(64),
       },
     });
