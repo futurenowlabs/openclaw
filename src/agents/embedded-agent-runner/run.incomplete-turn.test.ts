@@ -2955,6 +2955,12 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     ]);
     expect(result.meta.livenessState).toBe("abandoned");
     expect(result.meta.replayInvalid).toBe(true);
+    expect(result.meta.settledToolFinalization).toEqual({
+      contractVersion: "openclaw.settled-tool-terminal-finalization.v1",
+      owner: "embedded-agent-runner",
+      harnessClass: "builtin",
+      outcome: "fallback",
+    });
   });
 
   it("fails closed when isolated finalization emits new tool activity despite visible text", async () => {
@@ -3034,12 +3040,27 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expect(result.payloads?.[0]?.text).not.toContain("prior turn");
   });
 
-  it("does not create a second finalization owner for plugin-owned harnesses", async () => {
+  it("keeps the shared runner as the sole finalization owner for plugin harnesses", async () => {
+    const finalAssistant = {
+      role: "assistant",
+      stopReason: "end_turn",
+      provider: "openai",
+      model: "gpt-5.4",
+      content: [{ type: "text", text: "The plugin tool failed; no change was made." }],
+    } as unknown as EmbeddedRunAttemptResult["lastAssistant"];
     mockedClassifyFailoverReason.mockReturnValue(null);
-    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([
-      { text: "sanitized tool failure", isError: true },
-    ]);
-    mockedRunEmbeddedAttempt.mockResolvedValueOnce(makeSettledFailedToolAttempt());
+    mockedBuildEmbeddedRunPayloads
+      .mockReturnValueOnce([{ text: "sanitized tool failure", isError: true }])
+      .mockReturnValueOnce([{ text: "The plugin tool failed; no change was made." }]);
+    mockedRunEmbeddedAttempt
+      .mockResolvedValueOnce(makeSettledFailedToolAttempt())
+      .mockResolvedValueOnce(
+        makeAttemptResult({
+          assistantTexts: ["The plugin tool failed; no change was made."],
+          lastAssistant: finalAssistant,
+          currentAttemptAssistant: finalAssistant,
+        }),
+      );
 
     const result = await runEmbeddedAgent({
       ...overflowBaseRunParams,
@@ -3049,8 +3070,19 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
       runId: "run-settled-tool-plugin-owner",
     });
 
-    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
-    expect(result.payloads?.[0]).toMatchObject({ isError: true });
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(2);
+    expect(runAttemptCall(1)).toMatchObject({
+      disableTools: true,
+      toolsAllow: undefined,
+      suppressNextUserMessagePersistence: true,
+    });
+    expect(result.payloads).toEqual([{ text: "The plugin tool failed; no change was made." }]);
+    expect(result.meta.settledToolFinalization).toEqual({
+      contractVersion: "openclaw.settled-tool-terminal-finalization.v1",
+      owner: "embedded-agent-runner",
+      harnessClass: "plugin",
+      outcome: "final",
+    });
   });
 });
 

@@ -33,33 +33,78 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     return undefined;
   }
   const entry = value as Record<string, unknown>;
-  const publicTextProjectionPresent = Object.prototype.hasOwnProperty.call(
-    entry,
-    "publicTextProjection",
-  );
-  const publicTextHashPresent = Object.prototype.hasOwnProperty.call(entry, "publicTextSha256");
+  const publicTextProjectionPresent = Object.hasOwn(entry, "publicTextProjection");
+  const publicTextHashPresent = Object.hasOwn(entry, "publicTextSha256");
   const publicTextProjection = entry.publicTextProjection;
   const publicTextHash = entry.publicTextSha256;
+  const settledToolFinalizationAttempted = entry.settledToolFinalizationAttempted;
+  const settledToolFinalizationOutcome = entry.settledToolFinalizationOutcome;
+  const settledToolFinalizationHarnessClass = entry.settledToolFinalizationHarnessClass;
+  const toolCallCount = entry.toolCallCount;
+  const toolFailureCount = entry.toolFailureCount;
   if (
     entry.contractVersion !== "openclaw.cron-assistant-completion.v1" ||
     typeof entry.toolCallDetected !== "boolean" ||
     typeof entry.toolResultAccepted !== "boolean" ||
     typeof entry.finalAssistantVisible !== "boolean" ||
     typeof entry.finalUserVisibleResult !== "boolean" ||
-    !Number.isSafeInteger(entry.toolCallCount) ||
-    (entry.toolCallCount as number) < 0 ||
-    !Number.isSafeInteger(entry.toolFailureCount) ||
-    (entry.toolFailureCount as number) < 0 ||
-    (entry.toolFailureCount as number) > (entry.toolCallCount as number) ||
-    (entry.finalUserVisibleResult === true &&
-      publicTextProjection !== "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1") ||
-    (entry.finalUserVisibleResult === true &&
-      (typeof publicTextHash !== "string" || !/^[a-f0-9]{64}$/.test(publicTextHash))) ||
-    (entry.finalUserVisibleResult === false &&
-      (publicTextProjectionPresent || publicTextHashPresent)) ||
-    (entry.finalUserVisibleResult === true && entry.finalAssistantVisible !== true)
+    typeof toolCallCount !== "number" ||
+    !Number.isSafeInteger(toolCallCount) ||
+    toolCallCount < 0 ||
+    typeof toolFailureCount !== "number" ||
+    !Number.isSafeInteger(toolFailureCount) ||
+    toolFailureCount < 0 ||
+    toolFailureCount > toolCallCount ||
+    typeof settledToolFinalizationAttempted !== "boolean" ||
+    (settledToolFinalizationOutcome !== "not_applicable" &&
+      settledToolFinalizationOutcome !== "final" &&
+      settledToolFinalizationOutcome !== "fallback") ||
+    (settledToolFinalizationHarnessClass !== "none" &&
+      settledToolFinalizationHarnessClass !== "builtin" &&
+      settledToolFinalizationHarnessClass !== "plugin")
   ) {
     return undefined;
+  }
+  const settledToolFinalizationRelationValid =
+    (!settledToolFinalizationAttempted &&
+      settledToolFinalizationOutcome === "not_applicable" &&
+      settledToolFinalizationHarnessClass === "none") ||
+    (settledToolFinalizationAttempted &&
+      (settledToolFinalizationOutcome === "final" ||
+        settledToolFinalizationOutcome === "fallback") &&
+      (settledToolFinalizationHarnessClass === "builtin" ||
+        settledToolFinalizationHarnessClass === "plugin"));
+  if (
+    !settledToolFinalizationRelationValid ||
+    (settledToolFinalizationOutcome === "final" && !entry.finalUserVisibleResult) ||
+    (settledToolFinalizationOutcome === "fallback" && entry.finalUserVisibleResult) ||
+    (entry.finalUserVisibleResult && !entry.finalAssistantVisible)
+  ) {
+    return undefined;
+  }
+  let publicTextEvidence:
+    | Record<string, never>
+    | {
+        publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1";
+        publicTextSha256: string;
+      };
+  if (entry.finalUserVisibleResult) {
+    if (
+      publicTextProjection !== "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1" ||
+      typeof publicTextHash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(publicTextHash)
+    ) {
+      return undefined;
+    }
+    publicTextEvidence = {
+      publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+      publicTextSha256: publicTextHash,
+    };
+  } else {
+    if (publicTextProjectionPresent || publicTextHashPresent) {
+      return undefined;
+    }
+    publicTextEvidence = {};
   }
   return {
     contractVersion: "openclaw.cron-assistant-completion.v1",
@@ -67,15 +112,12 @@ function normalizeCronAssistantCompletion(value: unknown): CronRunLogEntry["assi
     toolResultAccepted: entry.toolResultAccepted,
     finalAssistantVisible: entry.finalAssistantVisible,
     finalUserVisibleResult: entry.finalUserVisibleResult,
-    toolCallCount: entry.toolCallCount as number,
-    toolFailureCount: entry.toolFailureCount as number,
-    ...(entry.finalUserVisibleResult === true
-      ? {
-          publicTextProjection:
-            publicTextProjection as "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
-          publicTextSha256: publicTextHash as string,
-        }
-      : {}),
+    toolCallCount,
+    toolFailureCount,
+    settledToolFinalizationAttempted,
+    settledToolFinalizationOutcome,
+    settledToolFinalizationHarnessClass,
+    ...publicTextEvidence,
   };
 }
 

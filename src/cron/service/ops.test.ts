@@ -456,7 +456,10 @@ describe("cron service ops seam coverage", () => {
       finalUserVisibleResult: true,
       toolCallCount: 1,
       toolFailureCount: 0,
-      publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1",
+      settledToolFinalizationAttempted: false,
+      settledToolFinalizationOutcome: "not_applicable" as const,
+      settledToolFinalizationHarnessClass: "none" as const,
+      publicTextProjection: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1" as const,
       publicTextSha256: "a".repeat(64),
     };
     const state = createCronServiceState({

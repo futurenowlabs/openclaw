@@ -26,6 +26,10 @@ function buildResult(params: {
   pending?: number;
   isError?: boolean;
   finalAssistantVisible?: boolean;
+  settledToolFinalization?: {
+    harnessClass: "builtin" | "plugin";
+    outcome: "final" | "fallback";
+  };
 }) {
   return {
     payloads: params.text === undefined ? [] : [{ text: params.text, isError: params.isError }],
@@ -43,6 +47,13 @@ function buildResult(params: {
         name: "exec",
         arguments: "sensitive fixture argument",
       })),
+      settledToolFinalization: params.settledToolFinalization
+        ? {
+            contractVersion: "openclaw.settled-tool-terminal-finalization.v1" as const,
+            owner: "embedded-agent-runner" as const,
+            ...params.settledToolFinalization,
+          }
+        : undefined,
     },
   };
 }
@@ -59,8 +70,52 @@ describe("buildCronAssistantCompletion", () => {
       finalUserVisibleResult: true,
       toolCallCount: 0,
       toolFailureCount: 0,
+      settledToolFinalizationAttempted: false,
+      settledToolFinalizationOutcome: "not_applicable",
+      settledToolFinalizationHarnessClass: "none",
       ...expectedPublicBinding("Public summary"),
     });
+  });
+
+  it("projects a plugin-owned settled-tool final without exposing tool evidence", () => {
+    const completion = buildCronAssistantCompletion(
+      buildResult({
+        text: "Safe final answer",
+        stopReason: "stop",
+        calls: 1,
+        failures: 1,
+        settledToolFinalization: { harnessClass: "plugin", outcome: "final" },
+      }),
+    );
+
+    expect(completion).toMatchObject({
+      settledToolFinalizationAttempted: true,
+      settledToolFinalizationOutcome: "final",
+      settledToolFinalizationHarnessClass: "plugin",
+      finalUserVisibleResult: true,
+    });
+    expect(JSON.stringify(completion)).not.toContain("embedded-agent-runner");
+  });
+
+  it("projects a content-free settled-tool fallback as non-deliverable", () => {
+    const completion = buildCronAssistantCompletion(
+      buildResult({
+        text: "fixed fallback",
+        stopReason: "error",
+        calls: 1,
+        failures: 1,
+        finalAssistantVisible: false,
+        settledToolFinalization: { harnessClass: "plugin", outcome: "fallback" },
+      }),
+    );
+
+    expect(completion).toMatchObject({
+      settledToolFinalizationAttempted: true,
+      settledToolFinalizationOutcome: "fallback",
+      settledToolFinalizationHarnessClass: "plugin",
+      finalUserVisibleResult: false,
+    });
+    expect(completion.publicTextSha256).toBeUndefined();
   });
 
   it("proves a completed tool result followed by final assistant text", () => {

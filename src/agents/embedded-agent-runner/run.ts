@@ -3178,24 +3178,22 @@ export async function runEmbeddedAgent(
           const settledToolTerminalContinuationInstruction =
             !settledToolFinalizationActive &&
             !settledToolFinalizationAttempted &&
-            agentHarness.id === "openclaw"
-              ? resolveSettledToolTerminalContinuationInstruction({
-                  provider: activeErrorContext.provider,
-                  modelId: activeErrorContext.model,
-                  modelApi: effectiveModel.api,
-                  executionContract,
-                  allowEmptyStopContinuation:
-                    params.trigger == null ||
-                    params.trigger === "user" ||
-                    params.trigger === "manual" ||
-                    params.trigger === "cron",
-                  payloadCount: hasOnlySyntheticToolErrorPayload ? 0 : payloadCount,
-                  aborted,
-                  promptError,
-                  timedOut,
-                  attempt,
-                })
-              : null;
+            resolveSettledToolTerminalContinuationInstruction({
+              provider: activeErrorContext.provider,
+              modelId: activeErrorContext.model,
+              modelApi: effectiveModel.api,
+              executionContract,
+              allowEmptyStopContinuation:
+                params.trigger == null ||
+                params.trigger === "user" ||
+                params.trigger === "manual" ||
+                params.trigger === "cron",
+              payloadCount: hasOnlySyntheticToolErrorPayload ? 0 : payloadCount,
+              aborted,
+              promptError,
+              timedOut,
+              attempt,
+            });
           if (settledToolTerminalContinuationInstruction) {
             const replayInvalid = true;
             const livenessState: EmbeddedRunLivenessState = "abandoned";
@@ -3217,6 +3215,12 @@ export async function runEmbeddedAgent(
                 replayInvalid,
                 livenessState,
                 toolSummary: currentAttemptToolSummary,
+                settledToolFinalization: {
+                  contractVersion: "openclaw.settled-tool-terminal-finalization.v1",
+                  owner: "embedded-agent-runner",
+                  harnessClass: agentHarness.id === "openclaw" ? "builtin" : "plugin",
+                  outcome: "fallback",
+                },
                 ...(failureSignal ? { failureSignal } : {}),
                 agentHarnessResultClassification: attempt.agentHarnessResultClassification,
               },
@@ -3771,6 +3775,17 @@ export async function runEmbeddedAgent(
                 ...(params.blockReplyBreak ? { blockStreaming: params.blockReplyBreak } : {}),
               },
               toolSummary: attemptToolSummary,
+              ...(settledToolFinalizationActive
+                ? {
+                    settledToolFinalization: {
+                      contractVersion: "openclaw.settled-tool-terminal-finalization.v1" as const,
+                      owner: "embedded-agent-runner" as const,
+                      harnessClass:
+                        agentHarness.id === "openclaw" ? ("builtin" as const) : ("plugin" as const),
+                      outcome: "final" as const,
+                    },
+                  }
+                : {}),
               ...(failureSignal ? { failureSignal } : {}),
               completion: {
                 ...(stopReason ? { stopReason } : {}),

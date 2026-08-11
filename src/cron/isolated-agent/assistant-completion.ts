@@ -53,6 +53,10 @@ export function buildCronAssistantCompletion(
     !stoppedBeforeFinal &&
     pendingToolCallCount === 0 &&
     (!toolCallDetected || toolResultAccepted);
+  const settledToolFinalization = result.meta.settledToolFinalization;
+  const settledToolFinalizationAttempted = settledToolFinalization !== undefined;
+  const settledToolFinalizationOutcome = settledToolFinalization?.outcome ?? "not_applicable";
+  const settledToolFinalizationHarnessClass = settledToolFinalization?.harnessClass ?? "none";
 
   return {
     contractVersion: "openclaw.cron-assistant-completion.v1",
@@ -62,6 +66,9 @@ export function buildCronAssistantCompletion(
     finalUserVisibleResult,
     toolCallCount,
     toolFailureCount,
+    settledToolFinalizationAttempted,
+    settledToolFinalizationOutcome,
+    settledToolFinalizationHarnessClass,
     ...(finalUserVisibleResult
       ? {
           publicTextProjection: CRON_PUBLIC_SUMMARY_PROJECTION,

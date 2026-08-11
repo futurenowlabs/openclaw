@@ -177,6 +177,9 @@ export type CronAssistantCompletion = {
   finalUserVisibleResult: boolean;
   toolCallCount: number;
   toolFailureCount: number;
+  settledToolFinalizationAttempted: boolean;
+  settledToolFinalizationOutcome: "not_applicable" | "final" | "fallback";
+  settledToolFinalizationHarnessClass: "none" | "builtin" | "plugin";
   /** Typed bounded projection used for the public cron run text. */
   publicTextProjection?: "openclaw.cron-summary.trim-utf16-2000-ellipsis.v1";
   /** SHA-256 of that exact producer-derived public text projection. */
