@@ -18,6 +18,9 @@ self-hosted-runner:
     - blacksmith-12vcpu-macos-15
     - blacksmith-6vcpu-macos-26
     - blacksmith-12vcpu-macos-26
+    # Agent Platform fork validation runner
+    - openclaw-lab
+    - openclaw-fork-ci
 
 # Ignore patterns for known issues
 paths:

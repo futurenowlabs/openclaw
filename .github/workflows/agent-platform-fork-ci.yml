@@ -1,0 +1,125 @@
+name: Fork CI
+
+on:
+  push:
+    branches:
+      - agent-platform/v2026.6.1-baseline
+      - codex/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openclaw-fork-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  trusted-linux:
+    name: Trusted Linux full validation
+    runs-on: [self-hosted, Linux, X64, openclaw-lab, openclaw-fork-ci]
+    timeout-minutes: 90
+    steps:
+      - name: Initialize task-local roots
+        env:
+          TASK_ROOT: ${{ runner.temp }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p \
+            "$TASK_ROOT/home" \
+            "$TASK_ROOT/xdg-cache" \
+            "$TASK_ROOT/pnpm" \
+            "$TASK_ROOT/corepack"
+          {
+            printf 'HOME=%s\n' "$TASK_ROOT/home"
+            printf 'XDG_CACHE_HOME=%s\n' "$TASK_ROOT/xdg-cache"
+            printf 'PNPM_HOME=%s\n' "$TASK_ROOT/pnpm"
+            printf 'COREPACK_HOME=%s\n' "$TASK_ROOT/corepack"
+          } >> "$GITHUB_ENV"
+
+      - name: Prove isolated Linux toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(uname -s)" == Linux ]]
+          [[ "$(uname -m)" == x86_64 ]]
+          mkdir -p "$HOME" "$XDG_CACHE_HOME" "$PNPM_HOME" "$COREPACK_HOME"
+          for tool in bash git node npm corepack; do
+            resolved="$(readlink -f "$(command -v "$tool")")"
+            case "$resolved" in
+              /mnt/*|*.exe|*.cmd|*.bat) exit 1 ;;
+              /*) ;;
+              *) exit 1 ;;
+            esac
+          done
+
+      - name: Check out trusted same-repository source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          clean: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: false
+
+      - name: Activate pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@11.2.2 --activate
+          for tool in node npm corepack pnpm; do
+            resolved="$(readlink -f "$(command -v "$tool")")"
+            case "$resolved" in
+              /mnt/*|*.exe|*.cmd|*.bat) exit 1 ;;
+              /*) ;;
+              *) exit 1 ;;
+            esac
+          done
+          node --version | grep -Fx 'v24.15.0'
+          pnpm --version | grep -Fx '11.2.2'
+
+      - name: Install exact dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check
+        run: pnpm check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Prove source-bound package reproducibility
+        env:
+          GIT_COMMIT: ${{ github.sha }}
+          OPENCLAW_BUILD_TIMESTAMP: "2026-01-01T00:00:00.000Z"
+        shell: bash
+        run: |
+          set -euo pipefail
+          first="$RUNNER_TEMP/pack-first"
+          second="$RUNNER_TEMP/pack-second"
+          mkdir -p "$first" "$second"
+          pnpm pack --pack-destination "$first" >/dev/null
+          pnpm pack --pack-destination "$second" >/dev/null
+          mapfile -t first_archives < <(find "$first" -maxdepth 1 -type f -name '*.tgz')
+          mapfile -t second_archives < <(find "$second" -maxdepth 1 -type f -name '*.tgz')
+          [[ "${#first_archives[@]}" -eq 1 ]]
+          [[ "${#second_archives[@]}" -eq 1 ]]
+          cmp --silent "${first_archives[0]}" "${second_archives[0]}"
+          sha256sum "${first_archives[0]}" | cut -d ' ' -f 1 >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean task-local source state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clean -ffdx
