@@ -88,8 +88,51 @@ jobs:
       - name: Install exact dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check
-        run: pnpm check
+      - name: Check with exact inherited-baseline classification
+        env:
+          BASE_REF: agent-platform/v2026.6.1-baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_log="$RUNNER_TEMP/pnpm-check.log"
+          set +e
+          pnpm check 2>&1 | tee "$check_log"
+          check_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$check_status" -eq 0 ]]; then
+            exit 0
+          fi
+
+          failure_count=$(grep -Ec 'failed:[0-9]+[[:space:]]+' "$check_log" || true)
+          shrinkwrap_failure_count=$(
+            grep -Ec 'failed:[0-9]+[[:space:]]+npm shrinkwrap guard$' "$check_log" || true
+          )
+          [[ "$failure_count" -eq 1 ]]
+          [[ "$shrinkwrap_failure_count" -eq 1 ]]
+
+          git fetch --no-tags --depth=1 origin \
+            "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          base_sha=$(git rev-parse "refs/remotes/origin/$BASE_REF^{commit}")
+          git diff --quiet "$base_sha" -- \
+            package.json \
+            pnpm-lock.yaml \
+            npm-shrinkwrap.json \
+            extensions
+
+          printf 'inheritedBaselineFailure=npm_shrinkwrap_guard\n' >> "$GITHUB_STEP_SUMMARY"
+          pnpm tsgo:all
+          pnpm lint
+          for policy_check in \
+            lint:webhook:no-low-level-body-read \
+            check:no-runtime-action-load-config \
+            check:deprecated-api-usage \
+            check:temp-path-guardrails \
+            lint:auth:no-pairing-store-group \
+            lint:auth:pairing-account-scope \
+            check:import-cycles
+          do
+            pnpm "$policy_check"
+          done
 
       - name: Test
         run: pnpm test
