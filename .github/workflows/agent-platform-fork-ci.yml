@@ -15,12 +15,14 @@ concurrency:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  OPENCLAW_TSDOWN_MAX_OLD_SPACE_MB: "4096"
+  OPENCLAW_VITEST_MAX_WORKERS: "2"
 
 jobs:
   trusted-linux:
     name: Trusted Linux full validation
     runs-on: [self-hosted, Linux, X64, openclaw-lab, openclaw-fork-ci]
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Initialize task-local roots
         env:
@@ -181,6 +183,11 @@ jobs:
           set -e
           if [[ "$test_status" -eq 0 ]]; then
             exit 0
+          fi
+
+          if grep -Fq 'ERR_WORKER_OUT_OF_MEMORY' "$test_log"; then
+            echo "::error::full_test_worker_memory_exhausted"
+            exit "$test_status"
           fi
 
           [[ "$test_status" -eq 134 ]]
