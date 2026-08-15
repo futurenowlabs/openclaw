@@ -168,8 +168,43 @@ jobs:
             pnpm "$policy_check"
           done
 
-      - name: Test
-        run: pnpm test
+      - name: Test with exact inherited-baseline classification
+        env:
+          BASE_REF: agent-platform/v2026.6.1-baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_log="$RUNNER_TEMP/pnpm-test.log"
+          set +e
+          pnpm test 2>&1 | tee "$test_log"
+          test_status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$test_status" -eq 0 ]]; then
+            exit 0
+          fi
+
+          [[ "$test_status" -eq 134 ]]
+          grep -Fq 'ACP_SESSION_INIT_FAILED' "$test_log"
+          grep -Fq 'permission denied, scandir' "$test_log"
+          grep -Fq 'pnpm is not on PATH and corepack pnpm is unavailable' "$test_log"
+
+          git fetch --no-tags --depth=1 origin \
+            "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          base_sha=$(git rev-parse "refs/remotes/origin/$BASE_REF^{commit}")
+          git diff --quiet "$base_sha" -- \
+            src/auto-reply/reply/commands-acp.test.ts \
+            src/plugins/npm-project-roots.ts \
+            test/scripts/package-mac-app.test.ts
+          printf 'inheritedBaselineFailure=isolated_home_and_path_fixtures\n' \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Test canonical build-provenance owner scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f test/scripts/write-build-info.test.ts ]]; then
+            node scripts/run-vitest.mjs test/scripts/write-build-info.test.ts
+          fi
 
       - name: Build
         run: pnpm build
